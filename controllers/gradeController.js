@@ -1,4 +1,4 @@
-const ScormProgress = require("../models/scormProgress");
+const ScormProgress = require("../models/ScormProgress");
 
 exports.getAllGrading = async (req, res) => {
   try {
