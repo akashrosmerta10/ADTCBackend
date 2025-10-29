@@ -140,7 +140,13 @@ exports.updateProfile = async (req, res) => {
     removeProfilePhoto = removeProfilePhoto === "true";
     receiveUpdates = receiveUpdates === "true";
 
-    if (roles) roles = JSON.parse(roles);
+    if (roles) {
+      try {
+        roles = typeof roles === "string" ? JSON.parse(roles) : roles;
+      } catch {
+        roles = [roles];
+      }
+    }
 
     const user = await User.findById(userId);
     if (!user) {
@@ -184,7 +190,7 @@ exports.updateProfile = async (req, res) => {
 
     if (typeof areasOfInterest === "string") areasOfInterest = JSON.parse(areasOfInterest);
     if (typeof learningGoals === "string") learningGoals = JSON.parse(learningGoals);
-    if (typeof areasOfInterest === "string") achievingGoals = JSON.parse(achievingGoals);
+    if (typeof achievingGoals === "string") achievingGoals = JSON.parse(achievingGoals);
 
     let onboardData;
     if (existingOnboard) {
@@ -209,15 +215,13 @@ exports.updateProfile = async (req, res) => {
       });
     }
 
-    await ActivityLog.create({
-      user: userId,
-      activityType: "OTHER",
-      metadata: {
-        note: "User updated profile and onboarding data",
-        ip: req.ip,
-        userAgent: req.headers["user-agent"],
-      },
-    });
+await logUserActivity({
+  userId,
+  activityType: "PROFILE_UPDATE",
+  metadata: { note: "User updated profile and onboarding data" },
+  req,
+});
+
 
     return res.status(200).json({
       success: true,
