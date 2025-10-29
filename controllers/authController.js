@@ -4,6 +4,8 @@ const bcrypt = require("bcryptjs");
 const { sendEmailOTP } = require("./mailController");
 const ActivityLog = require("../models/ActivityLogs");
 const errorResponse = require("../utils/errorResponse");
+const { logUserActivity } = require("../utils/activityLogger");
+
 
 const generateOTP = () => {
   const developmentEnv = "dev";
@@ -201,14 +203,17 @@ exports.verifyOTP = async (req, res) => {
     const token = jwt.sign(payload, process.env.JWT_SECRET, {
       expiresIn: "8h",
     });
-    await ActivityLog.create({
-      user: user._id,
+
+    await logUserActivity({
+      userId: user._id,
       activityType: "LOGIN",
       metadata: {
         ip: req.ip,
         userAgent: req.headers["user-agent"],
         note: "OTP verified and user logged in",
+        method: "OTP",
       },
+      req,
     });
 
     return res.status(200).json({
@@ -270,15 +275,17 @@ exports.resendOTP = async (req, res) => {
 
     await sendOTP(phoneNumber, otp);
 
-    await ActivityLog.create({
-      user: user._id,
+    await logUserActivity({
+      userId: user._id,
       activityType: "OTP_RESEND",
       metadata: {
         ip: req.ip,
         userAgent: req.headers["user-agent"],
         note: "User requested OTP resend",
       },
+      req,
     });
+
 
     return res.status(200).json({
       success: true,
@@ -376,6 +383,18 @@ exports.signup = async (req, res) => {
       }
     );
 
+    await logUserActivity({
+  userId: newUser._id,
+  activityType: "USER_CREATED",
+  metadata: {
+    ip: req.ip,
+    userAgent: req.headers["user-agent"],
+    note: `${newUser.roles[0]} registered successfully`,
+  },
+  req,
+});
+
+
     res.status(201).json({
       success: true,
       statusCode: 201,
@@ -454,6 +473,19 @@ exports.login = async (req, res) => {
       expiresIn: "8h",
     });
 
+    await logUserActivity({
+  userId: user._id,
+  activityType: "LOGIN",
+  metadata: {
+    ip: req.ip,
+    userAgent: req.headers["user-agent"],
+    method: "PASSWORD",
+    note: "User logged in via password",
+  },
+  req,
+});
+
+
     res.status(200).json({
       statusCode: 200,
       message: "Login successful!",
@@ -518,7 +550,7 @@ exports.resetPassword = async (req, res) => {
 // };
 const tokenBlacklist = new Set();
 
-exports.logout = (req, res) => {
+exports.logout = async (req, res) => {
   try {
     const authHeader = req.headers["authorization"];
     const token = authHeader && authHeader.split(" ")[1];
@@ -526,6 +558,18 @@ exports.logout = (req, res) => {
     if (token) {
       tokenBlacklist.add(token);
     }
+
+    await logUserActivity({
+  userId: req.user?.id,
+  activityType: "LOGOUT",
+  metadata: {
+    ip: req.ip,
+    userAgent: req.headers["user-agent"],
+    note: "User logged out",
+  },
+  req,
+});
+
 
     return res.status(200).json({
       success: true,

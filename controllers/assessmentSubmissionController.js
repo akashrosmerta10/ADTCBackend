@@ -1,7 +1,8 @@
 const mongoose = require("mongoose");
-const AssessmentSubmission = require("../models/assessmentSubmission");
+const AssessmentSubmission = require("../models/AssessmentSubmission");
 const errorResponse = require("../utils/errorResponse");
 const Course = require("../models/Course"); 
+const { logUserActivity } = require("../utils/activityLogger");
 
 
 async function getNextAttemptNumber({ userId, courseId, moduleId }, session) {
@@ -96,7 +97,28 @@ exports.upsertSubmission = async (req, res) => {
         },
         { new: true, upsert: false }
       );
-      return res.status(201).json({ success: true, statusCode: 201, message: "submission upserted successfully", data: updated });
+
+      await logUserActivity({
+        userId: payload.userId,
+        activityType: "OTHER",
+        metadata: {
+          event: "ASSESSMENT_UPDATED",
+          attemptId: payload.attemptId,
+          moduleId: payload.moduleId,
+          courseId: payload.courseId,
+          scoreEarned: payload.scoreEarned,
+          percent: payload.percent,
+          grade: payload.grade,
+        },
+        req,
+      });
+
+      return res.status(201).json({
+        success: true,
+        statusCode: 201,
+        message: "submission upserted successfully",
+        data: updated,
+      });
     }
 
     const maxRetries = 3;
@@ -146,7 +168,27 @@ exports.upsertSubmission = async (req, res) => {
         }
 
         const doc = await AssessmentSubmission.findOne({ attemptId: payload.attemptId });
-        return res.status(201).json({ success: true, statusCode: 201, message: "submission upserted successfully", data: doc });
+
+        await logUserActivity({
+          userId: payload.userId,
+          activityType: "OTHER",
+          metadata: {
+            event: "ASSESSMENT_SUBMITTED",
+            attemptId: payload.attemptId,
+            moduleId: payload.moduleId,
+            courseId: payload.courseId,
+            percent: payload.percent,
+            grade: payload.grade,
+          },
+          req,
+        });
+
+        return res.status(201).json({
+          success: true,
+          statusCode: 201,
+          message: "submission upserted successfully",
+          data: doc,
+        });
       } catch (err) {
         lastErr = err;
         if (err && err.code === 11000) {
@@ -159,11 +201,17 @@ exports.upsertSubmission = async (req, res) => {
 
     if (lastErr) throw lastErr;
     const doc = await AssessmentSubmission.findOne({ attemptId: payload.attemptId });
-    return res.status(201).json({ success: true, statusCode: 201, message: "submission upserted successfully", data: doc });
+    return res.status(201).json({
+      success: true,
+      statusCode: 201,
+      message: "submission upserted successfully",
+      data: doc,
+    });
   } catch (error) {
     return errorResponse(res, error);
   }
 };
+
 
 exports.getSubmissionByAttempt = async (req, res) => {
   try {
@@ -328,6 +376,20 @@ exports.finalUnlock = async (req, res) => {
     const allModulesAttempted = latestByModule.length === moduleIds.length;
     const allPassed = failedCount === 0 && passedCount === moduleIds.length;
     const unlocked = allModulesAttempted && allPassed;
+
+    if (unlocked) {
+      await logUserActivity({
+        userId,
+        activityType: "OTHER",
+        metadata: {
+          event: "COURSE_COMPLETED",
+          courseId,
+          passedModules: passedCount,
+          totalModules: moduleIds.length,
+        },
+        req,
+      });
+    }
 
     return res.json({
       success: true,

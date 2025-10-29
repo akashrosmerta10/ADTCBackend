@@ -3,6 +3,8 @@ const Course = require("../models/Course");
 const { getSignedImageUrl, deleteFromS3 } = require('../middleware/uploadToS3');
 const ActivityLog = require("../models/ActivityLogs");
 const errorResponse = require("../utils/errorResponse");
+const { logUserActivity } = require("../utils/activityLogger");
+
 
 exports.addToCart = async (req, res) => {
   try {
@@ -33,13 +35,19 @@ exports.addToCart = async (req, res) => {
       { upsert: true, new: true }
     );
 
-    await ActivityLog.create({
-      user: userId,
-      activityType: "COURSE_ADDED_TO_CART",
-      metadata: { courseId },
-      action: "add_to_cart",
-      details: `Course ${courseId} added to cart.`,
-    });
+await logUserActivity({
+  userId,
+  activityType: "COURSE_ADDED_TO_CART",
+  metadata: {
+    courseId,
+    action: "add_to_cart",
+    note: `Course ${courseId} added to cart.`,
+    ip: req.ip,
+    userAgent: req.headers["user-agent"],
+  },
+  req,
+});
+
 
     const { _id: cartId, user, cartItems, ...rest } = cart.toObject();
 
@@ -153,13 +161,19 @@ exports.removeFromCart = async (req, res) => {
       });
     }
 
-    await ActivityLog.create({
-      user: userId,
-      activityType: "COURSE_REMOVED_FROM_CART",
-      action: "remove_from_cart",
-      metadata: { courseId },
-      details: `Course ${courseId} removed from cart.`
-    });
+  await logUserActivity({
+  userId,
+  activityType: "COURSE_REMOVED_FROM_CART",
+  metadata: {
+    courseId,
+    action: "remove_from_cart",
+    note: `Course ${courseId} removed from cart.`,
+    ip: req.ip,
+    userAgent: req.headers["user-agent"],
+  },
+  req,
+});
+
 
     return res.status(200).json({
       success: true,
@@ -201,13 +215,18 @@ exports.clearCart = async (req, res) => {
       });
     }
 
-    await ActivityLog.create({
-      user: userId,
-      activityType: "CART_CLEARED",
-      action: "clear_cart",
-      metadata: { cartId: cart._id },
-      details: "Cart cleared.",
-    });
+await logUserActivity({
+  userId,
+  activityType: "CART_CLEARED",
+  metadata: {
+    cartId: cart._id,
+    action: "clear_cart",
+    note: "Cart cleared successfully.",
+    ip: req.ip,
+    userAgent: req.headers["user-agent"],
+  },
+  req,
+});
 
     return res.status(200).json({
       success: true,

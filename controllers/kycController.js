@@ -2,41 +2,47 @@ const { getSignedImageUrl } = require("../middleware/uploadToS3");
 const KYC = require("../models/KycLogs");
 const User = require("../models/User");
 const errorResponse = require("../utils/errorResponse");
+const { logUserActivity } = require("../utils/activityLogger");
+
 exports.submitkyc = async (req, res) => {
   try {
     const userId = req.user?.id;
     const docFiles = req.files?.docPhoto || [];
-     const docTypes = Array.isArray(req.body.docType)
+    const docTypes = Array.isArray(req.body.docType)
       ? req.body.docType
       : req.body.docType
-      ? [req.body.docType]
-      : [];
+        ? [req.body.docType]
+        : [];
 
-   const docPhotos = Array.isArray(req.body.docPhoto)
+    const docPhotos = Array.isArray(req.body.docPhoto)
       ? req.body.docPhoto
       : req.body.docPhoto
-      ? [req.body.docPhoto]
-      : [];
+        ? [req.body.docPhoto]
+        : [];
 
-  
     const docs = docTypes.map((type, index) => ({
       docType: type,
       docPhoto: docPhotos[index] || null,
     }));
    const licenceFile = req.body?.licenceFile;
-   
-    
+    if (!req.body.email) {
+      return res
+        .status(500)
+        .json({ success: false, message: "Please complete your profile" });
+    }
+
     const kycData = {
       ...req.body,
       userId,
-    docPhoto: docs,               
+      docPhoto: docs,
       licenceFile,
     };
 
     const newKYC = new KYC(kycData);
     await newKYC.save();
-       const user = await User.findById(userId);
-        if (req.body.licenceType === "learner") {
+
+    const user = await User.findById(userId);
+    if (req.body.licenceType === "learner") {
       if (!user.roles.includes("learner")) {
         user.roles.push("learner");
       }
@@ -45,6 +51,18 @@ exports.submitkyc = async (req, res) => {
         user.roles.push("trainer");
       }
     }
+    await user.save();
+
+    await logUserActivity({
+      userId,
+      activityType: "KYC_SUBMITTED",
+      metadata: {
+        action: "KYC_SUBMITTED",
+        licenceType: req.body.licenceType,
+        docCount: docs.length,
+      },
+      req,
+    });
 
     return res.status(201).json({
       success: true,
@@ -53,7 +71,7 @@ exports.submitkyc = async (req, res) => {
       data: newKYC,
     });
   } catch (error) {
-  return errorResponse(res, error)
+    return errorResponse(res, error);
   }
 };
 
@@ -61,14 +79,20 @@ exports.getKYC = async (req, res) => {
   try {
     const userId = req.user?.id;
     if (!userId) {
-      return res.status(400).json({ success: false, message: "User not authenticated" });
+      return res
+        .status(400)
+        .json({ success: false, message: "User not authenticated" });
     }
 
     const kyc = await KYC.findOne({ userId });
     if (!kyc) {
-      return res.status(404).json({ success: false, message: "KYC not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "KYC not found" });
     }
+
     const kycData = kyc.toObject();
+
     if (Array.isArray(kycData.docPhoto)) {
       kycData.docPhoto = await Promise.all(
         kycData.docPhoto.map(async (doc) => {
@@ -85,14 +109,21 @@ exports.getKYC = async (req, res) => {
       kycData.licenceFile = await getSignedImageUrl(kycData.licenceFile);
     }
 
+    await logUserActivity({
+      userId,
+      activityType: "KYC_VIEWED",
+      metadata: { action: "KYC_VIEWED" },
+      req,
+    });
+
     return res.status(200).json({
       success: true,
       statusCode: 200,
-      message: "kyc fetched successfully",
+      message: "KYC fetched successfully",
       data: kycData,
     });
   } catch (error) {
-    return errorResponse(res, error)
+    return errorResponse(res, error);
   }
 };
 
@@ -100,8 +131,11 @@ exports.updateKYC = async (req, res) => {
   try {
     const userId = req.user?.id;
     if (!userId) {
-      return res.status(400).json({ success: false, message: "User not authenticated" });
+      return res
+        .status(400)
+        .json({ success: false, message: "User not authenticated" });
     }
+
     const updateData = { ...req.body };
     if (req.files?.docPhoto) updateData.docPhoto = req.files.docPhoto[0].path;
     if (req.files?.licenceFile) updateData.licenceFile = req.files.licenceFile[0].path;
@@ -114,7 +148,10 @@ exports.updateKYC = async (req, res) => {
         if (!updateData[field]) {
           return res
             .status(400)
-            .json({ success: false, message: `${field} is required for full KYC update` });
+            .json({
+              success: false,
+              message: `${field} is required for full KYC update`,
+            });
         }
       }
 
@@ -129,8 +166,21 @@ exports.updateKYC = async (req, res) => {
         { new: true, runValidators: true }
       );
     } else {
-      return res.status(405).json({ success: false, message: "Method not allowed" });
+      return res
+        .status(405)
+        .json({ success: false, message: "Method not allowed" });
     }
+
+    await logUserActivity({
+      userId,
+      activityType: "KYC_UPDATED",
+      metadata: {
+        action: "KYC_UPDATED",
+        updatedFields: Object.keys(updateData),
+        updateType: req.method,
+      },
+      req,
+    });
 
     return res.status(200).json({
       success: true,
@@ -142,6 +192,3 @@ exports.updateKYC = async (req, res) => {
     return errorResponse(res, error);
   }
 };
-
-
-

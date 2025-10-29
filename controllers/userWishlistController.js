@@ -1,8 +1,8 @@
 const Wishlist = require('../models/Wishlist');
 const Course = require('../models/Course');
 const { getSignedImageUrl } = require('../middleware/uploadToS3');
-const ActivityLog = require("../models/ActivityLogs");
 const errorResponse = require('../utils/errorResponse');
+const { logUserActivity } = require("../utils/activityLogger");
 
 exports.getWishlist = async (req, res) => {
   try {
@@ -28,7 +28,6 @@ exports.getWishlist = async (req, res) => {
         }
       }
       courseObj.symbol = "₹";
-
       courses.push(courseObj);
     }
 
@@ -41,6 +40,13 @@ exports.getWishlist = async (req, res) => {
       symbol: "₹",
     };
 
+    await logUserActivity({
+      userId,
+      activityType: "WISHLIST_VIEWED",
+      req,
+      metadata: { wishlistId: wishlist._id, totalCourses: courses.length },
+    });
+
     return res.status(200).json({
       success: true,
       statusCode: 200,
@@ -52,7 +58,6 @@ exports.getWishlist = async (req, res) => {
     return errorResponse(res, error);
   }
 };
-
 
 exports.addToWishlist = async (req, res) => {
   try {
@@ -79,7 +84,6 @@ exports.addToWishlist = async (req, res) => {
     }
 
     let wishlist = await Wishlist.findOne({ user: userId });
-
     if (!wishlist) {
       wishlist = new Wishlist({ user: userId, courses: [] });
     }
@@ -96,12 +100,11 @@ exports.addToWishlist = async (req, res) => {
     wishlist.courses.push(courseId);
     await wishlist.save();
 
-    await ActivityLog.create({
-      user: userId,
+    await logUserActivity({
+      userId,
       activityType: "COURSE_ADDED_TO_WISHLIST",
-      metadata: {
-        courseId: courseId,
-      },
+      metadata: { courseId, wishlistId: wishlist._id },
+      req,
     });
 
     return res.status(200).json({
@@ -113,12 +116,12 @@ exports.addToWishlist = async (req, res) => {
         userId: wishlist.user,
         courses: wishlist.courses.map(id => ({ courseId: id })),
         createdAt: wishlist.createdAt,
-        updatedAt: wishlist.updatedAt
-      }
+        updatedAt: wishlist.updatedAt,
+      },
     });
 
   } catch (error) {
-    return errorResponse(res, error)
+    return errorResponse(res, error);
   }
 };
 
@@ -159,12 +162,11 @@ exports.removeFromWishlist = async (req, res) => {
     wishlist.courses.splice(index, 1);
     await wishlist.save();
 
-    await ActivityLog.create({
-      user: userId,
+    await logUserActivity({
+      userId,
       activityType: "COURSE_REMOVED_FROM_WISHLIST",
-      metadata: {
-        courseId: courseId,
-      },
+      metadata: { courseId, wishlistId: wishlist._id },
+      req,
     });
 
     const response = {
@@ -172,7 +174,7 @@ exports.removeFromWishlist = async (req, res) => {
       userId: wishlist.user,
       courses: wishlist.courses.map(id => ({ courseId: id })),
       createdAt: wishlist.createdAt,
-      updatedAt: wishlist.updatedAt
+      updatedAt: wishlist.updatedAt,
     };
 
     return res.status(200).json({
@@ -183,6 +185,6 @@ exports.removeFromWishlist = async (req, res) => {
     });
 
   } catch (error) {
-    return errorResponse(res, error)
+    return errorResponse(res, error);
   }
 };

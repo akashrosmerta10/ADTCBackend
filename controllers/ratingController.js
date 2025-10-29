@@ -1,5 +1,5 @@
 const Rating = require('../models/Ratings')
-const ActivityLog = require("../models/ActivityLogs");
+const { logUserActivity } = require("../utils/activityLogger");
 const errorResponse = require('../utils/errorResponse');
 
 exports.createRating = async (req, res) => {
@@ -35,11 +35,12 @@ exports.createRating = async (req, res) => {
 
     await newRating.save();
 
-    await ActivityLog.create({
-      user: userId,
-      activityType: "RATING",
-      metadata: { courseId, rating, comment },
-    });
+  await logUserActivity({
+  userId,
+  activityType: "RATING_CREATED",
+  metadata: { courseId, rating, comment },
+  req,
+});
 
     const ratingObj = newRating.toObject();
     const { _id: ratingId, course, user, ...rest } = ratingObj;
@@ -70,9 +71,9 @@ exports.getRating = async (req, res) => {
       .populate("user", "firstName");
 
     if (!rating) {
-      return res.status(404).json({
+      return res.status(204).json({
         success: false,
-        statusCode: 404,
+        statusCode: 204,
         message: "No rating found for this course by the user",
         data: null,
       });
@@ -105,23 +106,21 @@ exports.updateRating = async (req, res) => {
     );
 
     if (!updatedRating) {
-      return res.status(404).json({
+      return res.status(204).json({
         success: false,
-        statusCode: 404,
+        statusCode: 204,
         message: "Rating not found for this course by the user",
         data: null,
       });
     }
 
-    await ActivityLog.create({
-      user: userId,
-      activityType: "RATING",
-      metadata: {
-        courseId: courseId,
-        rating: rating,
-        comment: comment,
-      },
-    });
+await logUserActivity({
+  userId,
+  activityType: "RATING_UPDATED",
+  metadata: { courseId, rating, comment },
+  req,
+});
+
 
         const ratingObj = updatedRating.toObject();
     const { _id: ratingId, course, user, ...rest } = ratingObj;
@@ -197,14 +196,13 @@ exports.deleteRating = async (req, res) => {
 
     const deletedRating = await Rating.findByIdAndDelete(ratingId);
 
-    await ActivityLog.create({
-      user: userId,
-      activityType: "RATING_DELETED",
-      metadata: {
-        ratingId: ratingId,
-        courseId: rating.course,
-      },
-    });
+   await logUserActivity({
+  userId,
+  activityType: "RATING_DELETED",
+  metadata: { ratingId, courseId: rating.course },
+  req,
+});
+
 
      const ratingObj = deletedRating.toObject();
     const { _id: deletedRatingId, course, user, ...rest } = ratingObj;

@@ -1,4 +1,4 @@
-const AssessmentSubmission = require("../models/assessmentSubmission");
+const AssessmentSubmission = require("../models/AssessmentSubmission");
 const User = require("../models/User");
 const Course = require("../models/Course");
 

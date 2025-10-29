@@ -2,7 +2,7 @@ const User = require('../models/User');
 const bcrypt = require('bcryptjs');
 const path = require('path');
 const { getSignedImageUrl, deleteFromS3 } = require('../middleware/uploadToS3');
-const ActivityLog = require("../models/ActivityLogs");
+const { logUserActivity } = require("../utils/activityLogger");
 const OnBoardData = require("../models/OnBoardData");
 const errorResponse = require('../utils/errorResponse');
 
@@ -41,16 +41,13 @@ exports.createProfile = async (req, res) => {
 
     await newUser.save();
 
+await logUserActivity({
+  userId: newUser._id,
+  activityType: "USER_CREATED",
+  metadata: { note: "New user profile created by admin" },
+  req,
+});
 
-    await ActivityLog.create({
-      user: newUser._id,
-      activityType: "OTHER",
-      metadata: {
-        note: `New user profile created by admin`,
-        ip: req.ip,
-        userAgent: req.headers["user-agent"],
-      },
-    });
 
     return res.status(201).json({
       success: true,
@@ -140,7 +137,13 @@ exports.updateProfile = async (req, res) => {
     removeProfilePhoto = removeProfilePhoto === "true";
     receiveUpdates = receiveUpdates === "true";
 
-    if (roles) roles = JSON.parse(roles);
+    if (roles) {
+      try {
+        roles = typeof roles === "string" ? JSON.parse(roles) : roles;
+      } catch {
+        roles = [roles];
+      }
+    }
 
     const user = await User.findById(userId);
     if (!user) {
@@ -184,7 +187,7 @@ exports.updateProfile = async (req, res) => {
 
     if (typeof areasOfInterest === "string") areasOfInterest = JSON.parse(areasOfInterest);
     if (typeof learningGoals === "string") learningGoals = JSON.parse(learningGoals);
-    if (typeof areasOfInterest === "string") achievingGoals = JSON.parse(achievingGoals);
+    if (typeof achievingGoals === "string") achievingGoals = JSON.parse(achievingGoals);
 
     let onboardData;
     if (existingOnboard) {
@@ -209,15 +212,13 @@ exports.updateProfile = async (req, res) => {
       });
     }
 
-    await ActivityLog.create({
-      user: userId,
-      activityType: "OTHER",
-      metadata: {
-        note: "User updated profile and onboarding data",
-        ip: req.ip,
-        userAgent: req.headers["user-agent"],
-      },
-    });
+await logUserActivity({
+  userId,
+  activityType: "PROFILE_UPDATE",
+  metadata: { note: "User updated profile and onboarding data" },
+  req,
+});
+
 
     return res.status(200).json({
       success: true,
@@ -269,15 +270,13 @@ exports.changePassword = async (req, res) => {
     user.password = await bcrypt.hash(newPassword, 10);
     await user.save();
 
-    await ActivityLog.create({
-      user: userId,
-      activityType: "OTHER",
-      metadata: {
-        note: `User changed their password`,
-        ip: req.ip,
-        userAgent: req.headers["user-agent"],
-      },
-    });
+await logUserActivity({
+  userId,
+  activityType: "PASSWORD_CHANGED",
+  metadata: { note: "User changed their password" },
+  req,
+});
+
 
 
     res.status(200).json({ success: true, statusCode: 200, message: "Password updated successfully." });
@@ -302,15 +301,13 @@ exports.deleteProfile = async (req, res) => {
 
     await User.deleteOne({ _id: userId });
 
-    await ActivityLog.create({
-      user: userId,
-      activityType: "OTHER",
-      metadata: {
-        note: `User deleted user profile`,
-        ip: req.ip,
-        userAgent: req.headers["user-agent"],
-      },
-    });
+  await logUserActivity({
+  userId,
+  activityType: "USER_DELETED",
+  metadata: { note: "User deleted their own profile" },
+  req,
+});
+
 
     return res.status(200).json({
       success: true,

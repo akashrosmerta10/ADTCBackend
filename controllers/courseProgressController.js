@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 const CourseProgress = require("../models/CourseProgress");
 const Course = require("../models/Course")
 const errorResponse = require("../utils/errorResponse");
+const { logUserActivity } = require("../utils/activityLogger");
 
 exports.createProgress=async(req, res)=> {
   try {
@@ -33,6 +34,16 @@ exports.createProgress=async(req, res)=> {
       { upsert: true, new: true }
     );
 
+     await logUserActivity({
+      userId,
+      activityType: "COURSE_PROGRESS_INITIALIZED",
+      metadata: {
+        courseId,
+        message: "Course progress initialized or resumed",
+      },
+      req,
+    });
+
     return res.status(200).json({success: true, statusCode: 200, message: "progress updated successfully", data});
   } catch (error) {
     return errorResponse(res, error)
@@ -46,6 +57,16 @@ exports.getCourseProgress = async (req, res) => {
 
     let data = await CourseProgress.findOne({ userId, courseId });
     if (data) {
+      await logUserActivity({
+        userId,
+        activityType: "OTHER",
+        metadata: {
+          courseId,
+          message: "Viewed course progress",
+        },
+        req,
+      });
+
       return res.status(200).json({
         success: true,
         statusCode: 200,
@@ -83,6 +104,13 @@ exports.getCourseProgress = async (req, res) => {
       { upsert: true, new: true }
     );
 
+    await logUserActivity({
+      userId,
+      activityType: "OTHER",
+      metadata: { courseId, message: "Course progress initialized" },
+      req,
+    });
+
     return res.status(200).json({
       success: true,
       statusCode: 200,
@@ -90,9 +118,9 @@ exports.getCourseProgress = async (req, res) => {
       data,
     });
   } catch (error) {
-   return errorResponse(res, error);
+    return errorResponse(res, error);
   }
-}
+};
 
 exports.UpdateModuleProgress=async(req, res)=> {
     try {
@@ -151,6 +179,21 @@ const data = await CourseProgress.findOneAndUpdate(
   { new: true }
 );
 
+  await logUserActivity({
+      userId,
+      activityType: "COURSE_COMPLETED",
+      metadata: {
+        courseId,
+        moduleId,
+        progress,
+        overallProgress: data.overallProgress,
+        message:
+          data.overallProgress === 100
+            ? "Course fully completed"
+            : "Module progress updated",
+      },
+      req,
+    });
     return res.status(200).json({ success: true, statusCode: 200, message: "Module progress updated", data });
   } catch (error) {
     return errorResponse(res, error);
@@ -190,9 +233,20 @@ exports.getAverageProgressPerUser = async (req, res) => {
         },
       },
       {
-        $sort: { averageProgress: -1 }, 
+        $sort: { averageProgress: -1 },
       },
     ]);
+
+    await logUserActivity({
+      userId: req.user.id,
+      activityType: "OTHER",
+      metadata: {
+        role: req.user.roles,
+        action: "Viewed average progress per user",
+        resultsCount: results.length,
+      },
+      req,
+    });
 
     if (!results.length) {
       return res.status(200).json({
@@ -212,4 +266,4 @@ exports.getAverageProgressPerUser = async (req, res) => {
   } catch (error) {
     return errorResponse(res, error);
   }
-}
+};

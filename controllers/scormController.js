@@ -3,17 +3,17 @@ const ScormProgress = require("../models/ScormProgress");
 const CourseProgress = require("../models/CourseProgress");
 const Course = require("../models/Course");
 const errorResponse = require("../utils/errorResponse");
+const { logUserActivity } = require("../utils/activityLogger");
 
-// ---------------- SAVE PROGRESS ----------------
 exports.saveProgress = async (req, res) => {
   const {
     courseId,
     moduleId,
     lastPosition,
-    lessonLocation,   // watched duration in seconds
-    lessonStatus,     // status string
+    lessonLocation,
+    lessonStatus,
     scormData,
-    videoDuration     // total duration in seconds
+    videoDuration,
   } = req.body;
   const userId = req.user.id;
 
@@ -26,7 +26,6 @@ exports.saveProgress = async (req, res) => {
       });
     }
 
-    // Save/update SCORM progress (lessonLocation and videoDuration)
     const updatedScorm = await ScormProgress.findOneAndUpdate(
       { userId, courseId, moduleId },
       {
@@ -35,14 +34,13 @@ exports.saveProgress = async (req, res) => {
           lastPosition: lastPosition || "",
           lessonStatus: lessonStatus || "incomplete",
           scormData: scormData || {},
-          videoDuration: typeof videoDuration === 'number' ? videoDuration : 0,
+          videoDuration: typeof videoDuration === "number" ? videoDuration : 0,
           lastUpdatedAt: new Date(),
         },
       },
       { upsert: true, new: true }
     );
 
-    // Ensure CourseProgress doc exists
     let courseProgress = await CourseProgress.findOne({ userId, courseId });
     if (!courseProgress) {
       const course = await Course.findById(courseId, { modules: 1 }).lean();
@@ -60,14 +58,14 @@ exports.saveProgress = async (req, res) => {
       });
     }
 
-    // Calculate % watched if videoDuration > 0
     let newModuleProgress = 0;
     if (videoDuration > 0 && lessonLocation !== undefined && lessonLocation !== null) {
-      // Convert lessonLocation to number in case string
-      const watched = typeof lessonLocation === "string" ? parseInt(lessonLocation, 10) : lessonLocation;
+      const watched =
+        typeof lessonLocation === "string"
+          ? parseInt(lessonLocation, 10)
+          : lessonLocation;
       newModuleProgress = Math.min(100, Math.floor((watched / videoDuration) * 100));
     } else {
-      // Fallback: use lessonStatus
       switch (lessonStatus) {
         case "completed":
         case "passed":
@@ -82,7 +80,6 @@ exports.saveProgress = async (req, res) => {
       }
     }
 
-    // Update or insert module progress in CourseProgress
     let updatedCourse = await CourseProgress.findOneAndUpdate(
       { userId, courseId, "modules.moduleId": moduleId },
       {
@@ -110,7 +107,6 @@ exports.saveProgress = async (req, res) => {
       ).lean();
     }
 
-    // Recalculate overall progress
     const totalModules = updatedCourse.modules.length || 1;
     const completedModules = updatedCourse.modules.filter(
       (m) => (m.progress || 0) >= 100
@@ -119,6 +115,19 @@ exports.saveProgress = async (req, res) => {
 
     await CourseProgress.findByIdAndUpdate(updatedCourse._id, {
       $set: { overallProgress, lastComputedAt: new Date() },
+    });
+
+    await logUserActivity({
+      userId,
+      activityType: "SCORM_PROGRESS_SAVED",
+      req,
+      metadata: {
+        courseId,
+        moduleId,
+        newModuleProgress,
+        overallProgress,
+        lessonStatus,
+      },
     });
 
     return res.status(200).json({
@@ -139,14 +148,11 @@ exports.saveProgress = async (req, res) => {
   }
 };
 
-
-// ---------------- GET PROGRESS ----------------
 exports.getProgress = async (req, res) => {
   const { courseId, moduleId } = req.query;
   const userId = req.user.id;
 
   try {
-    // ✅ Ensure valid ObjectIds (avoids cast errors)
     const query = {
       userId: mongoose.Types.ObjectId.isValid(userId)
         ? new mongoose.Types.ObjectId(userId)
@@ -168,6 +174,16 @@ exports.getProgress = async (req, res) => {
         message: "No progress found for this user/module/course",
       });
     }
+
+    await logUserActivity({
+      userId,
+      activityType: "SCORM_PROGRESS_VIEWED",
+      req,
+      metadata: {
+        courseId,
+        moduleId,
+      },
+    });
 
     return res.status(200).json({
       success: true,

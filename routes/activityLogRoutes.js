@@ -14,7 +14,7 @@ const router = express.Router();
 router.get("/admin/activity-logs", auth, getAllActivityLogs);
 router.delete("/admin/activity-logs", auth, deleteAllActivityLogs);
 
-router.get("/user/:id", auth, getActivityLogsByUser);
-router.post("/create", auth, createActivityLog);
+router.get("/user/:userId", auth, getActivityLogsByUser);
+// router.post("/create", auth, createActivityLog);
 
 module.exports = router;
