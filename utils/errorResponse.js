@@ -8,7 +8,7 @@ const errorResponse = (res, err) => {
   if (err.code === 11000) {
     const field = Object.keys(err.keyPattern || {})[0] || "field";
     const value = err.keyValue ? Object.values(err.keyValue)[0] : "";
-    message = `Please use a different ${field}`;
+    message = `This ${field} already exists`;
     statusCode = 400;
   }
   // Handle generic message

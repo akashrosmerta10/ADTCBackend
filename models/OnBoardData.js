@@ -6,11 +6,11 @@ const onBoardDataSchema = new mongoose.Schema(
 
     hasLicense: { type: String, enum: ["yes", "no"], default: "no" },
     achievingGoals: [{type: String}],
-    licenseType: { type: String },
+    licenseType:[{ type: String }],
     yearsExperience: { type: String },
 
+    learningObjectives: [{ type: String }],
     areasOfInterest: [{ type: String }],
-    learningGoals: [{ type: String }],
 
     // educationLevel: { type: String },
     // occupation: { type: String },

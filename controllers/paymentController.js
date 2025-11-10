@@ -38,9 +38,17 @@ exports.createOrder = async (req, res) => {
 
   
     const razorpayOrder = await razorpayInstance.orders.create(options);
+//       const cart = await Cart.findById(cartId).populate("cartItems");
+      
+// const purchasedCourses = cart.cartItems.map(course => ({
+//   course: course._id,
+//   title: course.title,
+// }));
 
     const orderData = {
       orderId: razorpayOrder.id,
+      // purchasedCourses,
+      
       cartId: cartId || null,
       courseId: courseId || null,
       amount: finalPrice / 100,
@@ -48,6 +56,7 @@ exports.createOrder = async (req, res) => {
       status: "created",
       receipt: razorpayOrder.receipt,
     };
+   
 
     const order = new Order(orderData);
     const savedOrder = await order.save();

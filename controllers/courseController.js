@@ -63,11 +63,18 @@ exports.createCourse = async (req, res) => {
     const courseStatus = parseBoolean(status, 'status');
     const kycStatus = parseBoolean(kycRequired, 'kycRequired');
 
-    const formattedTitle = title.trim().replace(/\s+/g, '_').replace(/[^\w\-]/g, '');
-    const courseKey = `COURSE_${formattedTitle}`;
+    const formattedTitle = title
+      .trim()
+      .toLowerCase()
+      .replace(/\b\w/g, (char) => char.toUpperCase());
+
+    const formattedKeyTitle = formattedTitle
+      .replace(/\s+/g, "_")
+      .replace(/[^\w\-]/g, "");
+    const courseKey = `COURSE_${formattedKeyTitle}`;
 
     const newCourse = new Course({
-      title,
+      title: formattedTitle,
       description,
       image,
       category: new mongoose.Types.ObjectId(category),
@@ -101,7 +108,7 @@ exports.createCourse = async (req, res) => {
 
 exports.getAllCourses = async (req, res) => {
   try {
-    const courses = await Course.find().populate("category").populate("tags", "name");
+    const courses = await Course.find().populate("category", "name").populate("tags", "name");
 
     let user = null;
     const authHeader = req.headers.authorization;
@@ -349,7 +356,7 @@ exports.filteredCourses = async (req, res) => {
       filter.$or = orCondition;
     }
 
-    let courses = await Course.find(filter)
+    let courses = await Course.find(filter).populate("category", "name")
       .populate("tags", "name")
       .sort({ createdAt: -1 });
 

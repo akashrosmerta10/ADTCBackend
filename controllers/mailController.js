@@ -4,8 +4,8 @@ const transporter = nodemailer.createTransport({
   host: 'smtp.ethereal.email',
   port: 587,
   auth: {
-    user: 'heber.ward@ethereal.email',
-    pass: 'YBhcznNnrjQhJjmysM',          
+    user: 'precious.witting68@ethereal.email',
+    pass: 'SY57GA2wDWhDuHdgBA',          
   },
 });
 
@@ -18,14 +18,13 @@ const sendMail = async (req, res) => {
 }
 
 const sendEmailOTP = async (email, otp) => {
-
-    try {
+  try {
       const info = await transporter.sendMail({
-        from: '"ADTC TEST NodeMailer" <heber.ward@ethereal.email>',  
-        to: email,
+        from: '"ADTC TEST NodeMailer" <precious.witting68@ethereal.email>',  
+        to: email.to,
         subject: "Your OTP Code",
-        text: `Your OTP is: ${otp}`,
-        html: `<b>Your OTP is: ${otp}</b>`,
+        text: `Your OTP is: ${email.otp}`,
+        html: `<b>Your OTP is: ${email.otp}</b>`,
       });
     
       console.log("Ethereal Preview URL:", nodemailer.getTestMessageUrl(info));

@@ -4,6 +4,7 @@ const User = require("../models/User");
 const errorResponse = require("../utils/errorResponse");
 const { logUserActivity } = require("../utils/activityLogger");
 
+
 exports.submitkyc = async (req, res) => {
   try {
     const userId = req.user?.id;
@@ -25,11 +26,11 @@ exports.submitkyc = async (req, res) => {
       docPhoto: docPhotos[index] || null,
     }));
    const licenceFile = req.body?.licenceFile;
-    if (!req.body.email) {
-      return res
-        .status(500)
-        .json({ success: false, message: "Please complete your profile" });
-    }
+    // if (!req.body.email) {
+    //   return res
+    //     .status(500)
+    //     .json({ success: false, message: "Please complete your profile" });
+    // }
 
     const kycData = {
       ...req.body,

@@ -4,11 +4,11 @@ const Course = require("../models/Course")
 const errorResponse = require("../utils/errorResponse");
 const { logUserActivity } = require("../utils/activityLogger");
 
-exports.createProgress=async(req, res)=> {
+exports.createProgress = async (req, res) => {
   try {
     const userId = req.user.id;
     const { courseId } = req.body;
-    if (!courseId) return res.status(400).json({success: false, statusCode: 400, message: "courseId required" });
+    if (!courseId) return res.status(400).json({ success: false, statusCode: 400, message: "courseId required" });
 
     const existing = await CourseProgress.findOne({ userId, courseId });
     if (existing) return res.status(200).json(existing);
@@ -34,7 +34,7 @@ exports.createProgress=async(req, res)=> {
       { upsert: true, new: true }
     );
 
-     await logUserActivity({
+    await logUserActivity({
       userId,
       activityType: "COURSE_PROGRESS_INITIALIZED",
       metadata: {
@@ -44,7 +44,7 @@ exports.createProgress=async(req, res)=> {
       req,
     });
 
-    return res.status(200).json({success: true, statusCode: 200, message: "progress updated successfully", data});
+    return res.status(200).json({ success: true, statusCode: 200, message: "progress updated successfully", data });
   } catch (error) {
     return errorResponse(res, error)
   }
@@ -122,8 +122,8 @@ exports.getCourseProgress = async (req, res) => {
   }
 };
 
-exports.UpdateModuleProgress=async(req, res)=> {
-    try {
+exports.UpdateModuleProgress = async (req, res) => {
+  try {
     const userId = req.user.id;
     const { courseId, moduleId, progress } = req.body;
 
@@ -169,17 +169,17 @@ exports.UpdateModuleProgress=async(req, res)=> {
       ).lean();
     }
 
-   const total = after.modules.length || 1;
-const completed = after.modules.filter(m => (m.progress || 0) >= 100).length;
-const overall = Math.floor((completed / total) * 100);
+    const total = after.modules.length || 1;
+    const sum = after.modules.reduce((acc, m) => acc + (Number(m.progress) || 0), 0);
+    const overall = Math.round(sum / total);
 
-const data = await CourseProgress.findOneAndUpdate(
-  { _id: after._id },
-  { $set: { overallProgress: overall, lastComputedAt: new Date() } },
-  { new: true }
-);
+    const data = await CourseProgress.findOneAndUpdate(
+      { _id: after._id },
+      { $set: { overallProgress: overall, lastComputedAt: new Date() } },
+      { new: true }
+    );
 
-  await logUserActivity({
+    await logUserActivity({
       userId,
       activityType: "COURSE_COMPLETED",
       metadata: {
@@ -194,11 +194,13 @@ const data = await CourseProgress.findOneAndUpdate(
       },
       req,
     });
+
     return res.status(200).json({ success: true, statusCode: 200, message: "Module progress updated", data });
+
   } catch (error) {
     return errorResponse(res, error);
   }
-}
+};
 
 exports.getAverageProgressPerUser = async (req, res) => {
   try {

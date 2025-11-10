@@ -51,7 +51,7 @@ async function logUserActivity({ userId, activityType, metadata = {}, req }) {
     });
 
     await log.save();
-    console.log(`[ActivityLogger] ${activityType} logged for user: ${userId || "Guest"}`);
+    // console.log(`[ActivityLogger] ${activityType} logged for user: ${userId || "Guest"}`);
     return log;
   } catch (error) {
     console.error("[ActivityLogger] Failed to log activity:", error);

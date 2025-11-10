@@ -40,12 +40,12 @@ exports.getWishlist = async (req, res) => {
       symbol: "₹",
     };
 
-    await logUserActivity({
-      userId,
-      activityType: "WISHLIST_VIEWED",
-      req,
-      metadata: { wishlistId: wishlist._id, totalCourses: courses.length },
-    });
+    // await logUserActivity({
+    //   userId,
+    //   activityType: "WISHLIST_VIEWED",
+    //   req,
+    //   metadata: { wishlistId: wishlist._id, totalCourses: courses.length },
+    // });
 
     return res.status(200).json({
       success: true,

@@ -11,6 +11,7 @@ const activityLogSchema = new mongoose.Schema({
     enum: [
       "LOGIN",
       "LOGOUT",
+      "ADDRESS_UPDATED",
       "USER_CREATED",
       "USER_DELETED",
       "PROFILE_UPDATE",
@@ -40,7 +41,15 @@ const activityLogSchema = new mongoose.Schema({
       "COURSE_ADDED_TO_WISHLIST",
       "COURSE_REMOVED_FROM_WISHLIST",
       "WISHLIST_VIEWED",
-      "OTHER"
+      "OTHER",
+      "ADDRESS_UPDATED",
+      "OTP_SEND",
+      "NEW_USER_CREATION",
+      "USER_UPDATED",
+      "USER_CREATED",
+      "EMAIL_OTP_SENT",
+      "EMAIL_VERIFIED",
+      "EMAIL_OTP_RESEND",
 
     ],
 

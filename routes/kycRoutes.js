@@ -5,7 +5,9 @@ const multer = require('multer');
 const { uploadToS3Middleware } = require('../middleware/uploadToS3');
 const { submitkyc, getKYC, updateKYC } = require('../controllers/kycController');
 const upload = multer({ storage: multer.memoryStorage() });
+
 const validateKYCRequest = (req, res, next) => {
+  console.log("rr",req.body)
   if (!req.body.email) {
     return res.status(400).json({
       success: false,
@@ -17,13 +19,12 @@ const validateKYCRequest = (req, res, next) => {
 
 
 router.post('/submit', auth,
-  validateKYCRequest,
   upload.fields([
     { name: "docPhoto", maxCount: 10 },
     { name: "licenceFile", maxCount: 1 },
   ]),
+  validateKYCRequest,
   uploadToS3Middleware("docPhoto", "licenceFile"),
-
   submitkyc);
 
 router.get("/getkyc", auth, getKYC);

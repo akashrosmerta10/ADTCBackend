@@ -3,6 +3,7 @@ const bcrypt = require("bcryptjs");
 const { getSignedImageUrl, deleteFromS3 } = require('../middleware/uploadToS3');
 const ActivityLog = require("../models/ActivityLogs");
 const errorResponse = require("../utils/errorResponse");
+const KYCLogs = require("../models/KycLogs");
 
 
 exports.getAllUsers = async (req, res) => {
@@ -12,33 +13,157 @@ exports.getAllUsers = async (req, res) => {
     const skip = (page - 1) * limit;
 
     const search = req.query.search ? req.query.search.trim() : "";
+    const role = req.query.role ? req.query.role.trim() : "";
+    const lastHours = req.query.lastHours ? parseInt(req.query.lastHours, 10) : null;
+    const sortBy = req.query.sortBy || "updatedAt";
+    const sortOrder = req.query.sortOrder === "asc" ? 1 : -1;
 
-    // Build search filter
-    const searchFilter = search
-      ? {
-          $or: [
-            { firstName: { $regex: search, $options: "i" } },
-            { lastName: { $regex: search, $options: "i" } },
-            { phoneNumber: { $regex: search, $options: "i" } },
+    const match = {};
+    if (search) {
+      match.$or = [
+        { email: { $regex: search, $options: "i" } },
+        { phoneNumber: { $regex: search, $options: "i" } },
+      ];
+    }
+
+    if (role) {
+      match.roles = { $regex: new RegExp(`^${role}$`, "i") };
+    }
+    let activityTimeFloor = null;
+    if (!Number.isNaN(lastHours) && lastHours > 0) {
+      activityTimeFloor = new Date(Date.now() - lastHours * 60 * 60 * 1000);
+    }
+
+    const pipeline = [
+      { $match: match },
+      {
+        $lookup: {
+          from: "activitylogs",
+          let: { uid: "$_id" },
+          pipeline: [
+            { $match: { $expr: { $eq: ["$user", "$$uid"] } } },
+            ...(activityTimeFloor ? [{ $match: { createdAt: { $gte: activityTimeFloor } } }] : []),
+            { $sort: { createdAt: -1 } },
+            { $limit: 1 },
+            { $project: { _id: 1, createdAt: 1, type: 1, meta: 1 } },
           ],
+          as: "latestActivity",
+        },
+      },
+      {
+        $addFields: {
+          lastActivityAt: {
+            $cond: [
+              { $gt: [{ $size: "$latestActivity" }, 0] },
+              { $arrayElemAt: ["$latestActivity.createdAt", 0] },
+              null,
+            ],
+          },
+        },
+      },
+      ...(activityTimeFloor ? [{ $match: { lastActivityAt: { $ne: null } } }] : []),
+
+      {
+        $facet: {
+          total: [{ $count: "count" }],
+          data: [
+            { $sort: sortBy === "lastActivityAt" ? { lastActivityAt: sortOrder, updatedAt: -1 } : { updatedAt: sortOrder, _id: 1 } },
+            { $skip: skip },
+            { $limit: limit },
+            {
+              $lookup: {
+                from: "courses",
+                localField: "courses",
+                foreignField: "_id",
+                as: "courses",
+                pipeline: [{ $project: { title: 1 } }],
+              },
+            },
+            {
+              $lookup: {
+                from: "courses",
+                localField: "purchasedCourses",
+                foreignField: "_id",
+                as: "purchasedCourses",
+                pipeline: [{ $project: { title: 1 } }],
+              },
+            },
+            {
+              $lookup: {
+                from: "transactions",
+                localField: "transactions",
+                foreignField: "_id",
+                as: "transactions",
+              },
+            },
+            {
+              $lookup: {
+                from: "kyclogs",
+                let: { uid: "$_id" },
+                pipeline: [
+                  { $match: { $expr: { $eq: ["$userId", "$$uid"] } } },
+                  { $project: { status: 1 } },
+                  { $limit: 1 },
+                ],
+                as: "kycInfo",
+              },
+            },
+            {
+              $addFields: {
+                kycStatus: {
+                  $ifNull: [{ $arrayElemAt: ["$kycInfo.status", 0] }, "Not completed"],
+                },
+              },
+            },
+            {
+              $project: {
+                password: 0,
+                encryptedOTP: 0,
+                otpTimestamp: 0,
+                kycInfo: 0,
+                latestActivity: 0,
+              },
+            },
+            {
+              $addFields: {
+                userType: {
+                  $cond: [
+                    { $in: ["Admin", { $ifNull: ["$roles", []] }] },
+                    "admin",
+                    "user",
+                  ],
+                },
+              },
+            },
+          ],
+        },
+      },
+      {
+        $project: {
+          totalUsers: { $ifNull: [{ $arrayElemAt: ["$total.count", 0] }, 0] },
+          data: 1,
+        },
+      },
+    ];
+
+    const aggResult = await User.aggregate(pipeline);
+
+    const totalUsers = aggResult?.[0]?.totalUsers || 0;
+    const users = aggResult?.[0]?.data || [];
+
+    const formattedUsers = await Promise.all(
+      users.map(async (user) => {
+        let signedProfilePhoto = null;
+        if (user.profilePhoto) {
+          signedProfilePhoto = await getSignedImageUrl(user.profilePhoto);
         }
-      : {};
-
-    const totalUsers = await User.countDocuments(searchFilter);
-
-    const users = await User.find(searchFilter)
-      .populate("courses", "title _id")
-      .select("-password -encryptedOTP -otpTimestamp")
-      .populate("purchasedCourses", "title")
-      .populate("transactions", "amount")
-      .skip(skip)
-      .limit(limit);
-
-    const formattedUsers = users.map((user) => ({
-      ...user.toObject(),
-      userType: user.roles === "Admin" ? "admin" : "user",
-    }));
-
+        return {
+          ...user,
+          profilePhoto: signedProfilePhoto,
+        };
+      })
+    );
+   
     res.status(200).json({
       statusCode: 200,
       success: true,
@@ -47,7 +172,7 @@ exports.getAllUsers = async (req, res) => {
         totalUsers,
         currentPage: page,
         totalPages: Math.ceil(totalUsers / limit),
-        pageSize: users.length,
+        pageSize: formattedUsers.length,
         formattedUsers,
       },
     });

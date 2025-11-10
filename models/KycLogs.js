@@ -6,7 +6,18 @@ const kycSchema = new mongoose.Schema(
 
     fatherOrHusbandName: { type: String, required: true },
     gender: { type: String, enum: ["Male", "Female", "Other"], required: true },
-    dob: { type: Date, required: true },
+    dob: { type: Date, required: true,
+      validate: {
+        validator: function (value) {
+          const today = new Date();
+          const age = today.getFullYear() - value.getFullYear();
+          const monthdiff = today.getMonth() - value.getMonth();
+          const daydiff = today.getDay() - value.getDay();
+        const adjustage = monthdiff <0 || (monthdiff === 0 && daydiff < 0) ? age - 1 : age;
+        return adjustage >= 18;
+        }
+      }
+     },
 
     docPhoto: [
     {
@@ -24,13 +35,14 @@ const kycSchema = new mongoose.Schema(
     },
     education: {
        degree: { type: String, required: true },      
-       stream: { type: String, required: true }, 
+      //  stream: { type: String, required: true }, 
         institution: { type: String, required: true },  
         graduationyear: { type: Number, required: true },
-        gpa: { type: Number },                           
-        certifications: { type: String },            
-        courses: { type: String },                     
-        achievements: { type: String },      
+        GPA: { type: Number,required: true
+         },                           
+        // certifications: { type: String },            
+        // courses: { type: String },                     
+        // achievements: { type: String },      
       
     },
 

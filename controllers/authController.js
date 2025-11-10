@@ -177,6 +177,7 @@ exports.verifyOTP = async (req, res) => {
     user.encryptedOTP = null;
     user.otpTimestamp = null;
     if (user.status === "inactive") user.status = "active";
+    user.updatedAt = new Date();
     await user.save();
 
     const isProfileCompleted =
@@ -575,6 +576,182 @@ exports.logout = async (req, res) => {
       success: true,
       statusCode: 200,
       message: "Logged out successfully",
+    });
+  } catch (error) {
+    return errorResponse(res, error);
+  }
+};
+
+
+exports.requestEmailOTP = async (req, res) => {
+  try {
+    const userId = req.user?.id || req.user?._id;
+    if (!userId) {
+      return res.status(401).json({ success: false, statusCode: 401, message: "Unauthorized", data: null });
+    }
+
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({ success: false, statusCode: 400, message: "Email is required", data: null });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ success: false, statusCode: 404, message: "User not found", data: null });
+    }
+
+    user.pendingEmail = email;
+
+    const otp = generateOTP();
+    
+    user.emailEncryptedOTP = await bcrypt.hash(otp, await bcrypt.genSalt(10));
+    user.emailOtpTimestamp = new Date();
+    await user.save();
+
+    try {
+      await sendEmailOTP({ to: email, otp });
+      console.log("email and otp here", email, otp)
+    } catch (err) {
+      return res.status(500).json({ success: false, statusCode: 500, message: "Failed to send email OTP", data: null });
+    }
+
+    await logUserActivity({
+      userId: user._id,
+      activityType: "EMAIL_OTP_SENT",
+      metadata: { email },
+      req,
+    });
+
+    return res.status(200).json({
+      success: true,
+      statusCode: 200,
+      message: "Email OTP sent successfully",
+      data: { email },
+    });
+  } catch (error) {
+    return errorResponse(res, error);
+  }
+};
+
+exports.verifyEmailOTP = async (req, res) => {
+  try {
+    const userId = req.user?.id || req.user?._id;
+    const { email, otp } = req.body;
+
+    if (!userId) {
+      return res.status(401).json({ success: false, statusCode: 401, message: "Unauthorized", data: null });
+    }
+    if (!email) {
+      return res.status(400).json({ success: false, statusCode: 400, message: "Email is required", data: null });
+    }
+    if (!otp) {
+      return res.status(400).json({ success: false, statusCode: 400, message: "OTP is required", data: null });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ success: false, statusCode: 404, message: "User not found", data: null });
+    }
+
+    if (!user.emailEncryptedOTP || !user.emailOtpTimestamp) {
+      return res.status(400).json({ success: false, statusCode: 400, message: "OTP not requested or expired", data: null });
+    }
+
+    if (user.pendingEmail && user.pendingEmail !== email) {
+      return res.status(400).json({ success: false, statusCode: 400, message: "Email does not match pending email", data: null });
+    }
+
+    // Validate OTP and expiry window (10 minutes)
+    const isValidOTP = await bcrypt.compare(otp, user.emailEncryptedOTP);
+    const minutes = (Date.now() - new Date(user.emailOtpTimestamp).getTime()) / (300 * 60);
+    if (!isValidOTP || minutes > 10) {
+      return res.status(400).json({ success: false, statusCode: 400, message: "Invalid or expired OTP", data: null });
+    }
+
+    if (user.pendingEmail) {
+      user.email = user.pendingEmail;
+    }
+    user.pendingEmail = null;
+    user.emailVerified = true;
+    user.emailEncryptedOTP = null;
+    user.emailOtpTimestamp = null;
+    user.updatedAt = new Date();
+    await user.save();
+
+    await logUserActivity({
+      userId: user._id,
+      activityType: "EMAIL_VERIFIED",
+      metadata: { email: user.email },
+      req,
+    });
+
+    return res.status(200).json({
+      success: true,
+      statusCode: 200,
+      message: "Email verified successfully",
+      data: { emailVerified: true, email: user.email },
+    });
+  } catch (error) {
+    return errorResponse(res, error);
+  }
+};
+
+
+exports.resendEmailOTP = async (req, res) => {
+  try {
+    const userId = req.user?.id || req.user?._id;
+    const { email } = req.body || {};
+
+    if (!userId) {
+      return res.status(401).json({ success: false, statusCode: 401, message: "Unauthorized", data: null });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ success: false, statusCode: 404, message: "User not found", data: null });
+    }
+
+    let targetEmail = user.pendingEmail;
+    if (!targetEmail && email) {
+      targetEmail = email;
+      user.pendingEmail = email;
+    }
+
+    if (!targetEmail) {
+      return res.status(400).json({ success: false, statusCode: 400, message: "No email to send OTP to", data: null });
+    }
+
+    const now = Date.now();
+    const last = user.emailOtpTimestamp ? new Date(user.emailOtpTimestamp).getTime() : 0;
+    const secondsSinceLast = (now - last) / 1000;
+    if (secondsSinceLast < 60) {
+      return res.status(429).json({
+        success: false,
+        statusCode: 429,
+        message: `Please wait ${Math.ceil(60 - secondsSinceLast)} seconds before requesting another OTP`,
+        data: null,
+      });
+    }
+
+    const otp = generateOTP();
+    user.emailEncryptedOTP = await bcrypt.hash(otp, await bcrypt.genSalt(10));
+    user.emailOtpTimestamp = new Date();
+    await user.save();
+
+    await sendEmailOTP({ to: targetEmail, otp });
+
+    await logUserActivity({
+      userId: user._id,
+      activityType: "EMAIL_OTP_RESEND",
+      metadata: { email: targetEmail },
+      req,
+    });
+
+    return res.status(200).json({
+      success: true,
+      statusCode: 200,
+      message: "Email OTP resent successfully",
+      data: { email: targetEmail },
     });
   } catch (error) {
     return errorResponse(res, error);

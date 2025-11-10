@@ -103,6 +103,7 @@ exports.getProfile = async (req, res) => {
         roles: user.roles,
         profilePhoto: signedUrl || null,
         dob: user.dob,
+        emailVerified: user.emailVerified,
         isProfileCompleted,
       },
     });
@@ -130,8 +131,8 @@ exports.updateProfile = async (req, res) => {
       licenseType,
       achievingGoals,
       yearsExperience,
+      learningObjectives,
       areasOfInterest,
-      learningGoals,
     } = req.body;
 
     removeProfilePhoto = removeProfilePhoto === "true";
@@ -185,8 +186,9 @@ exports.updateProfile = async (req, res) => {
 
     let existingOnboard = await OnBoardData.findOne({ userId });
 
+    if (typeof licenseType === "string") licenseType = JSON.parse(licenseType);
+    if (typeof learningObjectives === "string") learningObjectives = JSON.parse(learningObjectives);
     if (typeof areasOfInterest === "string") areasOfInterest = JSON.parse(areasOfInterest);
-    if (typeof learningGoals === "string") learningGoals = JSON.parse(learningGoals);
     if (typeof achievingGoals === "string") achievingGoals = JSON.parse(achievingGoals);
 
     let onboardData;
@@ -195,8 +197,8 @@ exports.updateProfile = async (req, res) => {
       existingOnboard.licenseType = licenseType ?? existingOnboard.licenseType;
       existingOnboard.achievingGoals = achievingGoals ?? existingOnboard.achievingGoals;
       existingOnboard.yearsExperience = yearsExperience ?? existingOnboard.yearsExperience;
+      existingOnboard.learningObjectives = learningObjectives ?? existingOnboard.learningObjectives;
       existingOnboard.areasOfInterest = areasOfInterest ?? existingOnboard.areasOfInterest;
-      existingOnboard.learningGoals = learningGoals ?? existingOnboard.learningGoals;
 
       await existingOnboard.save();
       onboardData = existingOnboard;
@@ -207,8 +209,8 @@ exports.updateProfile = async (req, res) => {
         achievingGoals,
         licenseType,
         yearsExperience,
+        learningObjectives: learningObjectives || [],
         areasOfInterest: areasOfInterest || [],
-        learningGoals: learningGoals || [],
       });
     }
 

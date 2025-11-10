@@ -3,6 +3,12 @@ const mongoose = require("mongoose");
 const OrderSchema = new mongoose.Schema({
   orderId: { type: String, required: true, unique: true }, 
   cartId: { type: mongoose.Schema.Types.ObjectId, ref: "Cart"}, 
+  //  purchasedItems: [
+  //   {
+  //     courseId: { type: mongoose.Schema.Types.ObjectId, ref: "Course" },
+  //     price: Number,
+  //   },
+  // ],
    courseId: {type: mongoose.Schema.Types.ObjectId, ref: 'Course'},
   amount: { type: Number, required: true },
   currency: { type: String, default: "INR" }, 

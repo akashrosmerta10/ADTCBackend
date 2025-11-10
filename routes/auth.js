@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 
-const { requestOTP, verifyOTP, resendOTP, updateUserDetails, signup, login ,createAdmin, forgotPassword, resetPassword, validateusertoken, validateadmintoken, logout } = require('../controllers/authController');
+const { requestOTP, verifyOTP, resendOTP, updateUserDetails, signup, login ,createAdmin, forgotPassword, resetPassword, validateusertoken, validateadmintoken, logout, requestEmailOTP, verifyEmailOTP, resendEmailOTP } = require('../controllers/authController');
 
 const auth = require('../middleware/auth');
 
@@ -17,6 +17,12 @@ const auth = require('../middleware/auth');
 router.post('/request-otp', requestOTP);
 router.post('/verify-otp', verifyOTP);
 router.post('/resend-otp', resendOTP);
+
+router.post('/request-email-otp',auth,  requestEmailOTP);
+router.post('/verify-email-otp',auth, verifyEmailOTP);
+router.post('/resend-email-otp', auth, resendEmailOTP)
+
+
 // router.get("/validate", auth, validateusertoken);
 // router.get("/validateadmin", auth, validateadmintoken);
 //router.post('/update-user-details', auth, updateUserDetails);

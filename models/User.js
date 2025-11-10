@@ -27,8 +27,16 @@ const UserSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    emailEncryptedOTP: {
+      type: String,
+      default: null,
+    },
     otpTimestamp: {
       type: Date,
+      default: null,
+    },
+    emailOtpTimestamp: {
+      type: String,
       default: null,
     },
     firstName: {
@@ -49,6 +57,22 @@ const UserSchema = new mongoose.Schema(
         /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
         "Please enter a valid email address",
       ],
+    },
+     pendingEmail: {
+      type: String,
+      trim: true,
+      lowercase: true,
+      match: [
+        /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
+        "Please enter a valid email address",
+      ],
+      default: null,
+      index: true,
+    },
+    emailVerified: {
+      type: Boolean,
+      default: false,
+      index: true,
     },
    
     profilePhoto: {
@@ -93,14 +117,14 @@ const UserSchema = new mongoose.Schema(
       ref: "Wishlist",
     },
 
-    address: {
-    pincode: { type: String },
-    address: { type: String },
-    state: { type: String },
-    city: { type: String },
-    country: { type: String, default: "India" },
+  //   address: {
+  //   pincode: { type: String },
+  //   address: { type: String },
+  //   state: { type: String },
+  //   city: { type: String },
+  //   country: { type: String, default: "India" },
 
-  },
+  // },
   password: { type: String },
     receiveUpdates: { type: Boolean, default: false },
     completedAt: { type: Date, default: null },
