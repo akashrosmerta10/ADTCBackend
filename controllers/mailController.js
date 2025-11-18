@@ -13,7 +13,7 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-const templatePath = path.join(__dirname, "..", "..","client", "src", "email-template", "otpTemplate.html")
+const templatePath = path.join(__dirname, "..", "utils", "otpTemplate.html");
 const baseHtmlTemplate = fs.readFileSync(templatePath, "utf8");
 
 function renderOtpHtml(otp) {

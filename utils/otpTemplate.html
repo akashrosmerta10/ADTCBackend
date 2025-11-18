@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width">
+    <title>Verify your email</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 24px;
+            background: #f6f9fc;
+            font-family: Arial, Helvetica, sans-serif;
+            -webkit-font-smoothing: antialiased;
+            -ms-text-size-adjust: 100%;
+            -webkit-text-size-adjust: 100%;
+        }
+
+        .wrapper {
+            width: 100%;
+            table-layout: fixed;
+            background: #f6f9fc;
+        }
+
+        .card {
+            max-width: 520px;
+            margin: 0 auto;
+            background: #ffffff;
+            border-radius: 8px;
+            padding: 24px;
+            border: 1px solid #e5e7eb;
+        }
+
+        .brand-row {
+            text-align: center;
+            margin-bottom: 16px;
+        }
+
+        .logo {
+            display: block;
+            margin: 0 auto 8px auto;
+            width: 40px;
+            height: 40px;
+            border-radius: 8px;
+        }
+
+        .brand {
+            font-weight: 600;
+            font-size: 16px;
+            color: #111827;
+            margin: 0;
+        }
+
+        h2 {
+            font-size: 20px;
+            color: #111827;
+            margin: 16px 0 8px 0;
+            line-height: 1.3;
+        }
+
+        p {
+            color: #374151;
+            font-size: 15px;
+            line-height: 1.6;
+            margin: 0 0 12px 0;
+        }
+
+        .otp {
+            font-size: 28px;
+            letter-spacing: 4px;
+            font-weight: 700;
+            color: #111827;
+            background: #f3f4f6;
+            padding: 12px 16px;
+            border-radius: 6px;
+            display: inline-block;
+            margin: 8px 0 12px 0;
+        }
+
+        .muted {
+            color: #6b7280;
+            font-size: 13px;
+        }
+
+        .divider {
+            height: 1px;
+            background: #e5e7eb;
+            margin: 16px 0;
+        }
+
+        .security {
+            font-size: 13px;
+            color: #4b5563;
+            background: #f9fafb;
+            padding: 10px 12px;
+            border-radius: 6px;
+        }
+
+        /* Mobile adjustments */
+        @media (max-width: 600px) {
+            body {
+                padding: 16px;
+            }
+
+            .card {
+                padding: 20px;
+            }
+
+            .otp {
+                font-size: 26px;
+                letter-spacing: 3px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="wrapper">
+        <div class="card">
+            <div class="brand-row"><img
+                    class="logo" src="http://qa.shikshan.rosmertatech.com/images/logo/logo.svg" alt="ADTC Shikshan logo">
+                <p class="brand">ADTC Shikshan</p>
+            </div>
+            <h2>Verify your email</h2>
+            <p>Use the following one‑time password to complete your verification:</p>
+            <div class="otp">{{OTP}}</div>
+
+            <p class="muted">This code expires in 5 minutes and can be used only once.</p>
+
+            <div class="divider"></div>
+
+            <p class="security">For your security, do not share this code with anyone, including ADTC staff or support
+                agents.</p>
+
+            <p class="muted">Didn’t request this? You can safely ignore this email and no changes will be made.</p>
+        </div>
+
+    </div>
+</body>
+
+</html>
