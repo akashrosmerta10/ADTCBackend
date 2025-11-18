@@ -145,11 +145,19 @@ await logUserActivity({
 exports.getAllRatings = async (req, res) => {
   try {
     const { courseId } = req.params;
+    const { page = 1 } = req.query;
+    const limit = 10;
+    const skip = (page - 1) * limit;
 
     const ratings = await Rating.find({ course: courseId })
-      .populate("user", "firstName");
+      .populate("user", "firstName")
+      .sort({ createdAt: -1 })      // latest first
+      .skip(skip)
+      .limit(limit);
 
-          const data = ratings.map(rating => {
+    const total = await Rating.countDocuments({ course: courseId });
+
+    const data = ratings.map(rating => {
       const { _id: ratingId, course, ...rest } = rating.toObject();
       return {
         ratingId,
@@ -163,11 +171,15 @@ exports.getAllRatings = async (req, res) => {
       statusCode: 200,
       message: "Ratings fetched successfully",
       data,
+      total,             // total ratings count
+      page: Number(page),
+      hasMore: skip + ratings.length < total,  // if more exist
     });
   } catch (error) {
-  return errorResponse(res, error)
+    return errorResponse(res, error);
   }
 };
+
 
 exports.deleteRating = async (req, res) => {
   try {

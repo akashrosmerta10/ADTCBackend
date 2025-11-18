@@ -5,8 +5,13 @@ const Course = require("../models/Course");
 const errorResponse = require("../utils/errorResponse");
 const { logUserActivity } = require("../utils/activityLogger");
 const Question = require("../models/Questions");
+const CourseCompletion = require("../models/CourseCompletion");
+const User = require("../models/User");
+const Certificate = require("../models/Certificate");
 
-
+function makeCertId() {
+  return crypto.randomBytes(4).toString("hex").toUpperCase();
+}
 
 function makeAttemptKey(userId, courseId, moduleId) {
   return `${String(userId)}:${String(courseId)}:${String(moduleId)}`;
@@ -25,13 +30,13 @@ async function getNextAttemptNumber({ userId, courseId, moduleId }, session) {
 }
 
 async function sampleQuestions(moduleId, size) {
-  const mid = new mongoose.Types.ObjectId(String(moduleId)); // validate ObjectId [web:27]
+  const mid = new mongoose.Types.ObjectId(String(moduleId));
   const rows = await Question.aggregate([
-    { $match: { moduleId: mid, active: true } }, // filter active questions [web:22]
-    { $sample: { size } }, // random exact-size sampling [web:22]
+    { $match: { moduleId: mid, active: true } },
+    { $sample: { size } },
     { $project: { _id: 1 } },
   ]);
-  return rows.map(r => String(r._id)); // return string ids [web:22]
+  return rows.map(r => String(r._id));
 }
 
 
@@ -88,7 +93,6 @@ exports.startAssessment = async (req, res) => {
           sequence: 1,
           snapshotModuleName: moduleName ?? undefined,
 
-          // current placeholders
           scoreEarned: 0,
           scoreTotal: 0,
           correctCount: 0,
@@ -153,14 +157,15 @@ exports.startAssessment = async (req, res) => {
     if (session) session.endSession();
   }
 };
+
 async function sampleQuestions(moduleId, size) {
-  const mid = new mongoose.Types.ObjectId(String(moduleId)); // validate ObjectId [web:27]
+  const mid = new mongoose.Types.ObjectId(String(moduleId));
   const rows = await Question.aggregate([
-    { $match: { moduleId: mid, active: true } }, // filter active questions [web:22]
-    { $sample: { size } }, // true random sample of exact size [web:22]
+    { $match: { moduleId: mid, active: true } },
+    { $sample: { size } },
     { $project: { _id: 1 } },
   ]);
-  return rows.map(r => String(r._id)); // return string ids [web:22]
+  return rows.map(r => String(r._id));
 }
 
 async function checkFinalUnlocked(userId, courseId) {
@@ -218,111 +223,116 @@ async function checkFinalUnlocked(userId, courseId) {
     },
   ]);
 
-  let failedCount = 0; // count modules not passed [web:27]
-  const passed = new Set(); // track passed module ids [web:27]
+  let failedCount = 0;
+  const passed = new Set();
   for (const doc of latest) {
-    const score = Number.isFinite(doc?.maxPercent) ? doc.maxPercent : (Number.isFinite(doc?.percent) ? doc.percent : 0); // choose best [web:27]
-    const letter = doc?.bestGrade || gradeFromPercent(score); // compute grade if absent [web:27]
-    const ok = score >= 60 && letter !== "F"; // passing rule [web:27]
-    if (ok) passed.add(String(doc.moduleId)); else failedCount += 1; // accumulate [web:27]
+    const score = Number.isFinite(doc?.maxPercent) ? doc.maxPercent : (Number.isFinite(doc?.percent) ? doc.percent : 0);
+    const letter = doc?.bestGrade || gradeFromPercent(score);
+    const ok = score >= 60 && letter !== "F";
+    if (ok) passed.add(String(doc.moduleId)); else failedCount += 1;
   }
 
-  const unlocked = failedCount === 0 && passed.size === moduleIds.length; // all passed [web:27]
-  return { unlocked, totalModules: moduleIds.length, passedCount: passed.size, course, moduleIds }; // result [web:27]
+  const unlocked = failedCount === 0 && passed.size === moduleIds.length;
+  return { unlocked, totalModules: moduleIds.length, passedCount: passed.size, course, moduleIds };
 }
 
 exports.startFinal = async (req, res) => {
   const userId = req.user?._id || req.user?.id;
   const { courseId } = req.body;
   if (!userId || !courseId) {
-    return res.status(400).json({ success: false, statusCode: 400, message: "userId and courseId required", data: null }); // guard [web:27]
+    return res.status(400).json({ success: false, statusCode: 400, message: "userId and courseId required", data: null });
   }
 
   try {
     new mongoose.Types.ObjectId(String(userId));
     new mongoose.Types.ObjectId(String(courseId));
-  } catch {
-    return res.status(400).json({ success: false, statusCode: 400, message: "Invalid userId/courseId", data: null }); // invalid ids [web:27]
+  } catch (e) {
+    return res.status(400).json({ success: false, statusCode: 400, message: "Invalid userId/courseId", data: null });
+  }
+  let unlock;
+  try {
+    unlock = await checkFinalUnlocked(userId, courseId);
+  } catch (e) {
+    return res.status(500).json({ success: false, statusCode: 500, message: "Error checking final unlock", data: null });
   }
 
-  // 1) Authoritative unlock check
-  const unlock = await checkFinalUnlocked(userId, courseId); // your helper, unchanged [web:27]
   if (!unlock.unlocked) {
     return res.status(403).json({
       success: false,
       statusCode: 403,
       message: "Final locked: pass all modules first",
       data: { unlocked: false, passedCount: unlock.passedCount, totalModules: unlock.totalModules },
-    }); // deny if not unlocked [web:27]
+    });
   }
 
-  // 2) Build the 10-question mix based on presence of Road Signs
-  const courseDoc = unlock.course || await Course.findById(courseId, { modules: 1 }).lean(); // ensure course loaded [web:27]
+  const courseDoc = unlock.course || await Course.findById(courseId, { modules: 1 }).lean();
   const modules = (courseDoc?.modules || []).map(m => ({
     id: String(m._id || m.id),
     name: String(m.name || "").trim(),
-  })); // normalize modules [web:27]
+  }));
 
-  const road = modules.find(m => m.name.toLowerCase() === "road signs"); // detect Road Signs [web:27]
+  const road = modules.find(m => {
+    const n = m.name.toLowerCase();
+    return n === "road signs" || n === "road sign";
+  });
+
   let finalQuestionIds = [];
+  try {
+    if (road) {
 
-  if (road) {
-    // Need exactly 6 from Road Signs
-    const road6 = await sampleQuestions(road.id, 6); // exact 6 via $sample [web:22]
-    if (road6.length < 6) {
-      return res.status(422).json({ success: false, statusCode: 422, message: "Insufficient Road Signs questions", data: null }); // guard [web:22]
-    }
+      const road6 = await sampleQuestions(road.id, 6);
+      if (road6.length < 6) {
+        return res.status(422).json({ success: false, statusCode: 422, message: "Insufficient Road Signs questions", data: null });
+      }
 
-    // Need 4 from remaining modules
-    const remaining = modules.filter(m => m.id !== road.id).map(m => m.id);
-    let need = 4;
-    const bag = new Set();
-    for (const mid of remaining.sort(() => Math.random() - 0.5)) {
-      if (need <= 0) break;
-      const take = Math.min(4, need);
-      const picks = await sampleQuestions(mid, take); // sample per module [web:22]
-      for (const q of picks) {
+
+      const remaining = modules.filter(m => m.id !== road.id).map(m => m.id);
+      let need = 4;
+      const bag = new Set();
+      for (const mid of remaining.sort(() => Math.random() - 0.5)) {
         if (need <= 0) break;
-        if (!bag.has(q) && !road6.includes(q)) { bag.add(q); need -= 1; } // avoid duplicates [web:22]
+        const take = Math.min(4, need);
+        const picks = await sampleQuestions(mid, take);
+        for (const q of picks) {
+          if (need <= 0) break;
+          if (!bag.has(q) && !road6.includes(q)) { bag.add(q); need -= 1; }
+        }
       }
-    }
-    if (bag.size < 4) {
-      return res.status(422).json({ success: false, statusCode: 422, message: "Insufficient questions from remaining modules", data: null }); // guard [web:22]
-    }
-    finalQuestionIds = [...road6, ...Array.from(bag)];
-  } else {
-    // No Road Signs: pick 10 across all modules
-    const bag = new Set();
-    for (const m of [...modules].sort(() => Math.random() - 0.5)) {
-      if (bag.size >= 10) break;
-      const need = 10 - bag.size;
-      const take = Math.min(4, need);
-      const picks = await sampleQuestions(m.id, take); // sample per module [web:22]
-      for (const q of picks) { if (bag.size < 10) bag.add(q); }
-    }
-    if (bag.size < 10) {
-      // fallback: one-shot sample across all modules
-      const rows = await Question.aggregate([
-        { $match: { moduleId: { $in: modules.map(m => new mongoose.Types.ObjectId(m.id)) }, active: true } }, // match all modules [web:22]
-        { $sample: { size: 10 } }, // sample 10 [web:22]
-        { $project: { _id: 1 } },
-      ]);
-      finalQuestionIds = rows.map(r => String(r._id));
-      if (finalQuestionIds.length < 10) {
-        return res.status(422).json({ success: false, statusCode: 422, message: "Insufficient questions to create final", data: null }); // guard [web:22]
+      if (bag.size < 4) {
+        return res.status(422).json({ success: false, statusCode: 422, message: "Insufficient questions from remaining modules", data: null });
       }
+      finalQuestionIds = [...road6, ...Array.from(bag)];
     } else {
-      finalQuestionIds = Array.from(bag);
+      const bag = new Set();
+      for (const m of [...modules].sort(() => Math.random() - 0.5)) {
+        if (bag.size >= 10) break;
+        const need = 10 - bag.size;
+        const take = Math.min(4, need);
+        const picks = await sampleQuestions(m.id, take);
+        for (const q of picks) { if (bag.size < 10) bag.add(q); }
+      }
+      if (bag.size < 10) {
+        const rows = await Question.aggregate([
+          { $match: { moduleId: { $in: modules.map(m => new mongoose.Types.ObjectId(m.id)) }, active: true } },
+          { $sample: { size: 10 } },
+          { $project: { _id: 1 } },
+        ]);
+        finalQuestionIds = rows.map(r => String(r._id));
+        if (finalQuestionIds.length < 10) {
+          return res.status(422).json({ success: false, statusCode: 422, message: "Insufficient questions to create final", data: null });
+        }
+      } else {
+        finalQuestionIds = Array.from(bag);
+      }
     }
+  } catch (e) {
+    return res.status(500).json({ success: false, statusCode: 500, message: "Error sampling questions for final", data: null });
   }
 
-  // Shuffle and clamp to 10
-  finalQuestionIds = finalQuestionIds.sort(() => Math.random() - 0.5).slice(0, 10); // shuffle & limit [web:22]
+  finalQuestionIds = finalQuestionIds.sort(() => Math.random() - 0.5).slice(0, 10);
   if (finalQuestionIds.length !== 10) {
-    return res.status(422).json({ success: false, statusCode: 422, message: "Final selection did not reach 10 questions", data: null }); // guard [web:22]
+    return res.status(422).json({ success: false, statusCode: 422, message: "Final selection did not reach 10 questions", data: null });
   }
-
-  // 3) Create or return attempt; persist selected questionIds
   const FINAL_MODULE_SENTINEL = "final";
   const attemptKey = makeAttemptKey(userId, courseId, FINAL_MODULE_SENTINEL);
   const attemptId = makeAttemptId(attemptKey);
@@ -362,8 +372,7 @@ exports.startFinal = async (req, res) => {
           maxPercent: 0,
           maxScoreEarned: 0,
           bestGrade: undefined,
-          // Persist the 10 chosen question IDs for integrity
-          questions: finalQuestionIds.map(qid => ({ questionId: qid })),
+          seededQuestions: finalQuestionIds.map(qid => ({ questionId: qid })),
         }], { session }).then(r => r[0]);
 
         await logUserActivity({
@@ -373,9 +382,8 @@ exports.startFinal = async (req, res) => {
           req,
         });
       } else {
-        // Backfill if attempt exists but has no questions
-        if (!Array.isArray(doc.questions) || doc.questions.length === 0) {
-          doc.questions = finalQuestionIds.map(qid => ({ questionId: qid }));
+        if (!Array.isArray(doc.seededQuestions) || doc.seededQuestions.length === 0) {
+          doc.seededQuestions = finalQuestionIds.map(qid => ({ questionId: qid }));
           await doc.save({ session });
         }
       }
@@ -414,14 +422,19 @@ exports.startFinal = async (req, res) => {
             courseId: String(existing.courseId),
             moduleId: String(existing.moduleId),
             moduleName: existing.snapshotModuleName,
-            questionIds: (existing.questions || []).map(q => String(q.questionId)).slice(0, 10),
+            questionIds:
+              Array.isArray(existing.seededQuestions) && existing.seededQuestions.length > 0
+                ? existing.seededQuestions.map(q => String(q.questionId)).slice(0, 10)
+                : (existing.questions || []).map(q => String(q.questionId)).slice(0, 10),
           },
         });
       }
     }
     return errorResponse(res, err);
   } finally {
-    if (session) session.endSession();
+    if (session) {
+      try { session.endSession(); } catch { }
+    }
   }
 };
 
@@ -555,6 +568,48 @@ exports.upsertSubmission = async (req, res) => {
       req,
     });
 
+    const isFinal = String(updated?.moduleId) === "final";
+    const bestNow = Math.max(Number(updated?.maxPercent || 0), Number(updated?.percent || 0));
+    const passed = isFinal && bestNow >= 60;
+
+    if (passed) {
+
+      try {
+        await CourseCompletion.create({
+          userId: updated.userId,
+          courseId: updated.courseId,
+        });
+
+        await User.updateOne(
+          { _id: updated.userId },
+          { $inc: { completedCourse: 1 } }
+        );
+      } catch (e) {
+        if (!(e && e.code === 11000)) {
+          console.error("Error marking course completion:", e);
+        }
+      }
+
+      try {
+        const userDoc = await User.findById(updated.userId, { firstName: 1, lastName: 1 }).lean();
+        const courseDoc = await Course.findById(updated.courseId, { title: 1 }).lean();
+
+        await Certificate.create({
+          userId: updated.userId,
+          courseId: updated.courseId,
+          certificateId: makeCertId(),
+          username: `${userDoc?.firstName ?? ""} ${userDoc?.lastName ?? ""}`.trim() || "Learner",
+          courseName: courseDoc?.title || "Course",
+          issueDate: new Date(),
+          status: "issued",
+        });
+      } catch (e) {
+        if (!(e && e.code === 11000)) {
+          console.error("Certificate issuance error:", e);
+        }
+      }
+    }
+
     return res.status(201).json({
       success: true,
       statusCode: 201,
@@ -664,7 +719,7 @@ exports.latestByModule = async (req, res) => {
 
 exports.finalUnlock = async (req, res) => {
   try {
-    const userId = req.user?.id;
+    const userId = req.user?._id || req.user?.id;
     const { courseId } = req.query;
 
     if (!userId || !courseId) {
@@ -709,59 +764,82 @@ exports.finalUnlock = async (req, res) => {
         statusCode: 200,
         data: {
           unlocked: false,
-          failedCount: 0,
-          passedCount: 0,
           totalModules: 0,
         },
       });
     }
 
     const latestByModule = await AssessmentSubmission.aggregate([
-      { $match: { userId: userObjId, courseId: courseObjId, moduleId: { $in: moduleIds } } },
-      { $sort: { moduleId: 1, submittedAt: -1, createdAt: -1, attemptNumber: -1 } },
-      { $group: { _id: "$moduleId", latest: { $first: "$$ROOT" } } },
-      { $replaceRoot: { newRoot: "$latest" } },
+      { $match: { userId: userObjId, courseId: courseObjId } },
+      {
+        $addFields: {
+          moduleIdObj: {
+            $cond: [
+              {
+                $and: [
+                  { $ne: [{ $type: "$moduleId" }, "objectId"] },
+                  { $eq: [{ $strLenCP: { $toString: "$moduleId" } }, 24] },
+                ],
+              },
+              { $toObjectId: { $toString: "$moduleId" } },
+              "$moduleId",
+            ],
+          },
+        },
+      },
+      { $match: { moduleIdObj: { $in: moduleIds } } },
+      { $sort: { moduleIdObj: 1, submittedAt: -1, createdAt: -1, attemptNumber: -1 } },
+      { $group: { _id: "$moduleIdObj", latest: { $first: "$$ROOT" } } },
       {
         $project: {
-          moduleId: 1,
-          percent: 1,
-          maxPercent: 1,
-          grade: 1,
+          _id: 0,
+          moduleId: "$_id",
+          percent: { $ifNull: ["$latest.percent", 0] },
+          maxPercent: { $ifNull: ["$latest.maxPercent", 0] },
           bestGrade: {
             $ifNull: [
-              "$bestGrade",
+              "$latest.bestGrade",
               {
                 $switch: {
                   branches: [
-                    { case: { $gte: ["$maxPercent", 90] }, then: "A" },
-                    { case: { $gte: ["$maxPercent", 80] }, then: "B" },
-                    { case: { $gte: ["$maxPercent", 70] }, then: "C" },
-                    { case: { $gte: ["$maxPercent", 60] }, then: "D" },
+                    { case: { $gte: ["$latest.maxPercent", 90] }, then: "A" },
+                    { case: { $gte: ["$latest.maxPercent", 80] }, then: "B" },
+                    { case: { $gte: ["$latest.maxPercent", 70] }, then: "C" },
+                    { case: { $gte: ["$latest.maxPercent", 60] }, then: "D" },
                   ],
                   default: "F",
-                }
-              }
-            ]
-          }
-        }
-      }
+                },
+              },
+            ],
+          },
+        },
+      },
     ]);
 
     let failedCount = 0;
-    const passedModules = new Set();
-
+    const passedSet = new Set();
     for (const doc of latestByModule) {
-      const score = Number.isFinite(doc?.maxPercent) ? doc.maxPercent : (Number.isFinite(doc?.percent) ? doc.percent : 0);
-      const letter = doc?.bestGrade ?? gradeFromPercent(score);
-      const passed = score >= 60 && letter !== "F";
-      if (passed) passedModules.add(String(doc.moduleId));
+      const bestPercent = Number.isFinite(doc?.maxPercent)
+        ? Number(doc.maxPercent)
+        : Number.isFinite(doc?.percent)
+          ? Number(doc.percent)
+          : 0;
+      const letter = doc?.bestGrade ?? gradeFromPercent(bestPercent);
+      const passed = bestPercent >= 60 && letter !== "F";
+      if (passed) passedSet.add(String(doc.moduleId));
       else failedCount += 1;
     }
 
-    const passedCount = passedModules.size;
-    const allModulesAttempted = latestByModule.length === moduleIds.length;
-    const allPassed = failedCount === 0 && passedCount === moduleIds.length;
+    const attemptedCount = latestByModule.length;
+    const totalModules = moduleIds.length;
+    const passedCount = passedSet.size;
+
+    const allModulesAttempted = attemptedCount === totalModules;
+    const allPassed = failedCount === 0 && passedCount === totalModules;
     const unlocked = allModulesAttempted && allPassed;
+
+    const passedModules = Array.from(passedSet);
+    const remainingModules = totalModules - passedCount;
 
     if (unlocked) {
       await logUserActivity({
@@ -771,7 +849,7 @@ exports.finalUnlock = async (req, res) => {
           event: "COURSE_COMPLETED",
           courseId,
           passedModules: passedCount,
-          totalModules: moduleIds.length,
+          totalModules,
         },
         req,
       });
@@ -784,7 +862,9 @@ exports.finalUnlock = async (req, res) => {
         unlocked,
         failedCount,
         passedCount,
-        totalModules: moduleIds.length,
+        totalModules,
+        passedModules,
+        remainingModules,
       },
     });
   } catch (error) {
@@ -841,7 +921,6 @@ exports.courseStats = async (req, res) => {
       });
     }
 
-    // Reuse the same idea as latestByModule to get the latest per module
     const latestRows = await AssessmentSubmission.aggregate([
       { $match: { userId: userObjId, courseId: courseObjId, moduleId: { $in: moduleIds } } },
       { $sort: { moduleId: 1, submittedAt: -1, createdAt: -1, attemptNumber: -1 } },
@@ -971,5 +1050,204 @@ exports.courseModuleStats = async (req, res) => {
     });
   } catch (error) {
     return errorResponse(res, error);
+  }
+};
+
+
+exports.getLatestFinal = async (req, res) => {
+  try {
+    const userId = req.user?._id || req.user?.id;
+    const { courseId } = req.query;
+
+    if (!userId || !courseId) {
+      return res.status(400).json({
+        success: false,
+        statusCode: 400,
+        message: "userId and courseId are required",
+        data: null,
+      });
+    }
+
+    let userObjId, courseObjId;
+    try {
+      userObjId = new mongoose.Types.ObjectId(String(userId));
+      courseObjId = new mongoose.Types.ObjectId(String(courseId));
+    } catch {
+      return res.status(400).json({
+        success: false,
+        statusCode: 400,
+        message: "Invalid userId or courseId",
+        data: null,
+      });
+    }
+
+    const FINAL_MODULE_SENTINEL = "final";
+    const rows = await AssessmentSubmission.aggregate([
+      { $match: { userId: userObjId, courseId: courseObjId, moduleId: FINAL_MODULE_SENTINEL } },
+      { $sort: { submittedAt: -1, createdAt: -1, attemptNumber: -1 } },
+      { $limit: 1 },
+      {
+        $project: {
+          _id: 0,
+          attemptId: 1,
+          attemptNumber: 1,
+          status: 1,
+          startedAt: 1,
+          submittedAt: 1,
+          courseId: 1,
+          moduleId: 1,
+          moduleName: "$snapshotModuleName",
+          percent: { $ifNull: ["$percent", 0] },
+          maxPercent: { $ifNull: ["$maxPercent", 0] },
+          bestGrade: {
+            $ifNull: [
+              "$bestGrade",
+              {
+                $switch: {
+                  branches: [
+                    { case: { $gte: ["$maxPercent", 90] }, then: "A" },
+                    { case: { $gte: ["$maxPercent", 80] }, then: "B" },
+                    { case: { $gte: ["$maxPercent", 70] }, then: "C" },
+                    { case: { $gte: ["$maxPercent", 60] }, then: "D" },
+                  ],
+                  default: "F",
+                },
+              },
+            ],
+          },
+          scoreEarned: { $ifNull: ["$scoreEarned", 0] },
+          scoreTotal: { $ifNull: ["$scoreTotal", 0] },
+          timeSeconds: { $ifNull: ["$timeSeconds", 0] },
+        },
+      },
+    ]);
+
+    const latest = rows[0] || null;
+
+    return res.status(200).json({
+      success: true,
+      statusCode: 200,
+      message: "latest final fetched",
+      data: latest, // null if none yet
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      statusCode: 500,
+      message: "Server error in getLatestFinal",
+      error: error.message,
+    });
+  }
+};
+
+exports.getCourseAssessmentCard = async (req, res) => {
+  try {
+    const userId = req.user?._id || req.user?.id;
+    const { courseId } = req.query;
+    if (!userId || !courseId) {
+      return res.status(400).json({ success: false, statusCode: 400, message: "userId and courseId required", data: null });
+    }
+
+    let userObjId, courseObjId;
+    try {
+      userObjId = new mongoose.Types.ObjectId(String(userId));
+      courseObjId = new mongoose.Types.ObjectId(String(courseId));
+    } catch {
+      return res.status(400).json({ success: false, statusCode: 400, message: "Invalid userId or courseId", data: null });
+    }
+
+    const course = await Course.findById(courseObjId, { modules: 1, title: 1 }).lean();
+    if (!course) {
+      return res.status(404).json({ success: false, statusCode: 404, message: "Course not found", data: null });
+    }
+    const moduleIds = (course.modules || []).map(m => new mongoose.Types.ObjectId(String(m._id || m.id)));
+
+    const latestRows = await AssessmentSubmission.aggregate([
+      { $match: { userId: userObjId, courseId: courseObjId, status: "submitted" } },
+      {
+        $addFields: {
+          moduleIdStr: {
+            $cond: [
+              { $eq: [{ $type: "$moduleId" }, "objectId"] },
+              { $toString: "$moduleId" },
+              { $toString: "$moduleId" },
+            ],
+          },
+        },
+      },
+      { $sort: { submittedAt: -1, createdAt: -1, attemptNumber: -1 } },
+      { $group: { _id: "$moduleIdStr", latest: { $first: "$$ROOT" } } },
+      {
+        $project: {
+          _id: 0,
+          moduleId: "$_id",
+          attemptNumber: "$latest.attemptNumber",
+          percent: { $ifNull: ["$latest.percent", 0] },
+          maxPercent: { $ifNull: ["$latest.maxPercent", 0] },
+          scoreEarned: { $ifNull: ["$latest.scoreEarned", 0] },
+          scoreTotal: { $ifNull: ["$latest.scoreTotal", 0] },
+          timeSeconds: { $ifNull: ["$latest.timeSeconds", 0] },
+        },
+      },
+    ]);
+
+    const byModule = new Map();
+    let finalPassed = false;
+    for (const r of latestRows) {
+      if (r.moduleId === "final") {
+        const best = Number.isFinite(r.maxPercent) ? Number(r.maxPercent) : Number(r.percent ?? 0);
+        finalPassed = best >= 60;
+      } else {
+        byModule.set(r.moduleId, r);
+      }
+    }
+
+    let attemptedModules = 0;
+    let passedModules = 0;
+    let attemptsTaken = 0;
+    let timeSeconds = 0;
+    let scoreEarned = 0;
+    let scoreTotal = 0;
+
+    for (const mid of moduleIds) {
+      const key = String(mid);
+      const row = byModule.get(key);
+      if (row) {
+        const percent = Number(row.percent ?? 0);
+        const best = Number.isFinite(row.maxPercent) ? Number(row.maxPercent) : percent;
+
+        if (percent > 0 || Number(row.attemptNumber ?? 0) > 0) attemptedModules += 1;
+        if (best >= 60) passedModules += 1;
+
+        attemptsTaken += Number(row.attemptNumber ?? 0);
+        timeSeconds += Number(row.timeSeconds ?? 0);
+        scoreEarned += Number(row.scoreEarned ?? 0);
+        scoreTotal += Number(row.scoreTotal ?? 0);
+      }
+    }
+
+    const totalModules = moduleIds.length;
+    const overallPct = totalModules > 0 ? Math.round((passedModules / totalModules) * 100) : 0;
+
+    return res.status(200).json({
+      success: true,
+      statusCode: 200,
+      data: {
+        courseId: String(courseId),
+        title: course.title,
+        totalModules,
+        attemptedModules,
+        passedModules,
+        overallPct,
+        attemptsTaken,
+        timeSeconds,
+        scoreEarned,
+        scoreTotal,
+        finalPassed,
+      },
+    });
+  } catch (error) {
+    console.error("getCourseAssessmentCard error:", error);
+    return res.status(500).json({ success: false, statusCode: 500, message: "Server error", error: error.message, data: null });
   }
 };

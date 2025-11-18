@@ -72,7 +72,12 @@ const uploadToS3Middleware = (...fields) => {
           uniqueKey = `Shikshan/questions/${moduleId}/${uniqueCode}.${ext}`;
          req.body.question = req.body.question 
           req.body.question.imageUrl = uniqueKey;
-        }
+        } else if (fieldname === "categoryImage") {
+  const Category = req.body.name;
+  uniqueKey = `Shikshan/category/${Category}.${fileExtension}`;
+  req.body.categoryImage = uniqueKey;
+}
+
 
         const uploadParams = {
           Bucket: process.env.AWS_BUCKET_NAME,

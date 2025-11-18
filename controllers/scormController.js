@@ -117,18 +117,18 @@ exports.saveProgress = async (req, res) => {
       $set: { overallProgress, lastComputedAt: new Date() },
     });
 
-    await logUserActivity({
-      userId,
-      activityType: "SCORM_PROGRESS_SAVED",
-      req,
-      metadata: {
-        courseId,
-        moduleId,
-        newModuleProgress,
-        overallProgress,
-        lessonStatus,
-      },
-    });
+    // await logUserActivity({
+    //   userId,
+    //   activityType: "SCORM_PROGRESS_SAVED",
+    //   req,
+    //   metadata: {
+    //     courseId,
+    //     moduleId,
+    //     newModuleProgress,
+    //     overallProgress,
+    //     lessonStatus,
+    //   },
+    // });
 
     return res.status(200).json({
       success: true,
@@ -175,15 +175,15 @@ exports.getProgress = async (req, res) => {
       });
     }
 
-    await logUserActivity({
-      userId,
-      activityType: "SCORM_PROGRESS_VIEWED",
-      req,
-      metadata: {
-        courseId,
-        moduleId,
-      },
-    });
+    // await logUserActivity({
+    //   userId,
+    //   activityType: "SCORM_PROGRESS_VIEWED",
+    //   req,
+    //   metadata: {
+    //     courseId,
+    //     moduleId,
+    //   },
+    // });
 
     return res.status(200).json({
       success: true,

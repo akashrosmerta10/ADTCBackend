@@ -7,7 +7,6 @@ const { submitkyc, getKYC, updateKYC } = require('../controllers/kycController')
 const upload = multer({ storage: multer.memoryStorage() });
 
 const validateKYCRequest = (req, res, next) => {
-  console.log("rr",req.body)
   if (!req.body.email) {
     return res.status(400).json({
       success: false,

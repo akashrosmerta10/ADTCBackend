@@ -38,18 +38,18 @@ exports.submitkyc = async (req, res) => {
       docPhoto: docs,
       licenceFile,
     };
-
+ 
     const newKYC = new KYC(kycData);
-    await newKYC.save();
+     await newKYC.save();
 
     const user = await User.findById(userId);
     if (req.body.licenceType === "learner") {
-      if (!user.roles.includes("learner")) {
-        user.roles.push("learner");
+      if (!user.roles.includes("Learner")) {
+        user.roles.push("Learner");
       }
     } else if (req.body.licenceType === "driving") {
-      if (!user.roles.includes("trainer")) {
-        user.roles.push("trainer");
+      if (!user.roles.includes("Trainer")) {
+        user.roles.push("Trainer");
       }
     }
     await user.save();

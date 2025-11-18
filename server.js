@@ -3,7 +3,6 @@ const dotenv = require('dotenv');
 const connectDB = require('./config/db');
 const cors = require('cors');
 const path = require('path');
-const cookieParser = require("cookie-parser");
 
 dotenv.config();
 
@@ -18,7 +17,6 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-app.use(cookieParser());
 app.use(express.json());
 
 app.use('/scorm', express.static(path.join(__dirname, 'public/scorm')));

@@ -2,8 +2,8 @@ const jwt = require("jsonwebtoken");
 const User = require("../models/User");
 const bcrypt = require("bcryptjs");
 const { sendEmailOTP } = require("./mailController");
-const ActivityLog = require("../models/ActivityLogs");
 const errorResponse = require("../utils/errorResponse");
+const axios = require("axios");
 const { logUserActivity } = require("../utils/activityLogger");
 
 
@@ -20,9 +20,22 @@ const sendOTP = async (phoneNumber, otp) => {
 const sendEOTP = async (email, otp) => {
   console.log(`Sending OTP ${otp} to ${email}`);
 };
+
 exports.requestOTP = async (req, res) => {
   try {
-    const { phoneNumber, portal } = req.body;
+    const { phoneNumber, portal, token } = req.body;
+     const captchaRes = await axios.post(
+    "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+    new URLSearchParams({
+      secret: process.env.TURNSTILE_SECRET_KEY,
+      response: token,
+    })
+  );
+
+  if (!captchaRes.data.success) {
+    return res.status(400).json({ message: "Captcha verification failed" });
+  }
+ 
 
     if (!phoneNumber) {
       return res.status(400).json({
@@ -385,15 +398,15 @@ exports.signup = async (req, res) => {
     );
 
     await logUserActivity({
-  userId: newUser._id,
-  activityType: "USER_CREATED",
-  metadata: {
-    ip: req.ip,
-    userAgent: req.headers["user-agent"],
-    note: `${newUser.roles[0]} registered successfully`,
-  },
-  req,
-});
+      userId: newUser._id,
+      activityType: "USER_CREATED",
+      metadata: {
+        ip: req.ip,
+        userAgent: req.headers["user-agent"],
+        note: `${newUser.roles[0]} registered successfully`,
+      },
+      req,
+    });
 
 
     res.status(201).json({
@@ -475,16 +488,16 @@ exports.login = async (req, res) => {
     });
 
     await logUserActivity({
-  userId: user._id,
-  activityType: "LOGIN",
-  metadata: {
-    ip: req.ip,
-    userAgent: req.headers["user-agent"],
-    method: "PASSWORD",
-    note: "User logged in via password",
-  },
-  req,
-});
+      userId: user._id,
+      activityType: "LOGIN",
+      metadata: {
+        ip: req.ip,
+        userAgent: req.headers["user-agent"],
+        method: "PASSWORD",
+        note: "User logged in via password",
+      },
+      req,
+    });
 
 
     res.status(200).json({
@@ -561,15 +574,15 @@ exports.logout = async (req, res) => {
     }
 
     await logUserActivity({
-  userId: req.user?.id,
-  activityType: "LOGOUT",
-  metadata: {
-    ip: req.ip,
-    userAgent: req.headers["user-agent"],
-    note: "User logged out",
-  },
-  req,
-});
+      userId: req.user?.id,
+      activityType: "LOGOUT",
+      metadata: {
+        ip: req.ip,
+        userAgent: req.headers["user-agent"],
+        note: "User logged out",
+      },
+      req,
+    });
 
 
     return res.status(200).json({
@@ -603,14 +616,13 @@ exports.requestEmailOTP = async (req, res) => {
     user.pendingEmail = email;
 
     const otp = generateOTP();
-    
+
     user.emailEncryptedOTP = await bcrypt.hash(otp, await bcrypt.genSalt(10));
     user.emailOtpTimestamp = new Date();
     await user.save();
 
     try {
       await sendEmailOTP({ to: email, otp });
-      console.log("email and otp here", email, otp)
     } catch (err) {
       return res.status(500).json({ success: false, statusCode: 500, message: "Failed to send email OTP", data: null });
     }
@@ -661,10 +673,9 @@ exports.verifyEmailOTP = async (req, res) => {
       return res.status(400).json({ success: false, statusCode: 400, message: "Email does not match pending email", data: null });
     }
 
-    // Validate OTP and expiry window (10 minutes)
     const isValidOTP = await bcrypt.compare(otp, user.emailEncryptedOTP);
-    const minutes = (Date.now() - new Date(user.emailOtpTimestamp).getTime()) / (300 * 60);
-    if (!isValidOTP || minutes > 10) {
+    const minutes = (Date.now() - new Date(user.emailOtpTimestamp).getTime()) / 60000;
+    if (!isValidOTP || minutes > 5) {
       return res.status(400).json({ success: false, statusCode: 400, message: "Invalid or expired OTP", data: null });
     }
 
@@ -676,6 +687,15 @@ exports.verifyEmailOTP = async (req, res) => {
     user.emailEncryptedOTP = null;
     user.emailOtpTimestamp = null;
     user.updatedAt = new Date();
+
+
+    const domain = user.email.split("@")[1];
+   const freeDomains = process.env.FREE_DOMAINS.split(",");
+
+    if (freeDomains.includes(domain)) {
+      user.freeDomainUser = true;
+    }
+
     await user.save();
 
     await logUserActivity({
@@ -689,7 +709,7 @@ exports.verifyEmailOTP = async (req, res) => {
       success: true,
       statusCode: 200,
       message: "Email verified successfully",
-      data: { emailVerified: true, email: user.email },
+      data: { emailVerified: true, email: user.email, freeDomainUser: user.freeDomainUser || false  },
     });
   } catch (error) {
     return errorResponse(res, error);

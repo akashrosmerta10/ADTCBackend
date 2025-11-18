@@ -10,94 +10,180 @@ const errorResponse = require("../utils/errorResponse");
 exports.createOrder = async (req, res) => {
   try {
     const { finalPrice, currency, cartId, courseId } = req.body;
-    const userId = req.user?.id; 
+    const userId = req.user?.id;
 
-    if (!finalPrice || !currency) {
+    if (!Number.isFinite(finalPrice) || finalPrice < 0 || !currency) {
       return res.status(400).json({
         success: false,
         statusCode: 400,
-        message: 'Amount and currency are required',
+        message: 'Valid amount (>= 0, in paise) and currency are required',
         data: null,
       });
     }
-     if (!cartId && !courseId) {
+    if (!cartId && !courseId) {
       return res.status(400).json({
         success: false,
         statusCode: 400,
-        message: "Either cartId or courseId is required.",
+        message: 'Either cartId or courseId is required.',
         data: null,
       });
     }
-    
+
+    let orderedCourses = [];
+    let cartDoc = null;
+    if (cartId) {
+      cartDoc = await Cart.findById(cartId).populate('cartItems');
+      if (!cartDoc) {
+        return res.status(404).json({ success: false, statusCode: 404, message: 'Cart not found', data: null });
+      }
+      orderedCourses = cartDoc.cartItems.map((item) => item._id);
+    } else if (courseId) {
+      orderedCourses = [courseId];
+    }
+
+    if (finalPrice === 0) {
+      const internalReceipt = `FREE_${Date.now()}`;
+      const orderData = {
+        orderId: `free_order_${Date.now()}`,
+        orderedCourses,
+        cartId: cartId || null,
+        courseId: courseId || null,
+        amount: 0,
+        currency,
+        status: 'paid',
+        receipt: internalReceipt,
+        paymentMode: 'FREE',
+        notes: { gateway: 'INTERNAL', reason: 'Zero total (employee coupon)' }
+      };
+
+      const savedOrder = await new Order(orderData).save();
+
+      let purchasedCourses = [];
+      if (courseId) {
+        purchasedCourses = [courseId];
+      } else if (cartId) {
+        const cdoc = await Cart.findById(cartId);
+        purchasedCourses = cdoc?.cartItems || [];
+      }
+
+      const placeholderPaymentId = `FREE_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+      const payment = await Payment.create({
+        orderId: savedOrder._id,
+        paymentId: placeholderPaymentId,
+        signature: 'FREE_SIGNATURE',
+        amount: 0,
+        status: 'verified',
+      });
+
+      if (cartId) {
+        await Cart.findByIdAndUpdate(cartId, { $set: { cartItems: [] } });
+      } else if (courseId && userId) {
+        await Cart.findOneAndUpdate(
+          { user: userId },
+          { $pull: { cartItems: courseId } },
+          { new: true }
+        );
+      }
+
+      if (userId) {
+        await User.findByIdAndUpdate(userId, {
+          $push: { transactions: payment?._id },
+          $addToSet: { purchasedCourses: { $each: purchasedCourses } }
+        });
+      }
+
+      await ActivityLog.create({
+        user: userId,
+        activityType: "COURSE_PURCHASED",
+        metadata: {
+          transactionId: payment?._id,
+          ip: req.ip,
+          userAgent: req.headers["user-agent"],
+        },
+      });
+
+      let populatedOrder;
+      if (cartId) {
+        populatedOrder = await Order.findById(savedOrder._id).populate({
+          path: 'cartId',
+          populate: {
+            path: 'cartItems',
+            populate: { path: 'category', select: 'name' },
+          },
+        });
+      } else if (courseId) {
+        populatedOrder = await Order.findById(savedOrder._id).populate({
+          path: 'courseId',
+          populate: { path: 'category', select: 'name' },
+        });
+      }
+
+      return res.status(201).json({
+        success: true,
+        statusCode: 201,
+        message: 'Order created successfully (FREE)',
+        data: {
+          order: populatedOrder,
+          userId,
+          symbol: '₹',
+          isFreeOrder: true,
+          purchasedCourses,
+        },
+      });
+    }
 
     const options = {
-      amount: finalPrice ,
+      amount: finalPrice,
       currency,
       receipt: `receipt_${Date.now()}`,
     };
-
-  
     const razorpayOrder = await razorpayInstance.orders.create(options);
-//       const cart = await Cart.findById(cartId).populate("cartItems");
-      
-// const purchasedCourses = cart.cartItems.map(course => ({
-//   course: course._id,
-//   title: course.title,
-// }));
 
     const orderData = {
       orderId: razorpayOrder.id,
-      // purchasedCourses,
-      
+      orderedCourses,
       cartId: cartId || null,
       courseId: courseId || null,
       amount: finalPrice / 100,
       currency,
       status: "created",
       receipt: razorpayOrder.receipt,
+      paymentMode: 'GATEWAY',
+      notes: { gateway: 'RAZORPAY' }
     };
-   
 
-    const order = new Order(orderData);
-    const savedOrder = await order.save();
+    const savedOrder = await new Order(orderData).save();
 
     let populatedOrder;
     if (cartId) {
       populatedOrder = await Order.findById(savedOrder._id).populate({
-        path: "cartId",
+        path: 'cartId',
         populate: {
-          path: "cartItems",
-          populate: {
-            path: "category", 
-            select: "name",
-          },
+          path: 'cartItems',
+          populate: { path: 'category', select: 'name' },
         },
       });
     } else if (courseId) {
       populatedOrder = await Order.findById(savedOrder._id).populate({
-        path: "courseId",
-        populate: {
-          path: "category",
-          select: "name",
-        },
+        path: 'courseId',
+        populate: { path: 'category', select: 'name' },
       });
     }
 
     return res.status(201).json({
       success: true,
       statusCode: 201,
-      message: "Order created successfully",
+      message: 'Order created successfully',
       data: {
         order: populatedOrder,
         userId,
-        symbol: "₹"
+        symbol: '₹'
       },
     });
   } catch (error) {
-  return errorResponse(res, error)
+    return errorResponse(res, error);
   }
 };
-
 
 exports.verifyPayment = async (req, res) => {
   try {
@@ -107,7 +193,7 @@ exports.verifyPayment = async (req, res) => {
       razorpay_signature,
     } = req.body;
 
-    const userId = req.user?.id; 
+    const userId = req.user?.id;
 
     const body = `${razorpay_order_id}|${razorpay_payment_id}`;
     const expectedSignature = crypto
@@ -124,7 +210,9 @@ exports.verifyPayment = async (req, res) => {
       });
     }
 
-    const order = await Order.findOne({ orderId: razorpay_order_id }).populate("cartId").populate("courseId");
+    const order = await Order.findOne({ orderId: razorpay_order_id })
+      .populate("cartId")
+      .populate("courseId");
 
     if (!order) {
       return res.status(404).json({
@@ -134,69 +222,45 @@ exports.verifyPayment = async (req, res) => {
         data: null,
       });
     }
+
     let purchasedCourses = [];
     if (order.courseId) {
-     
       purchasedCourses = [order.courseId._id];
     } else if (order.cartId) {
-     
       purchasedCourses = order.cartId.cartItems || [];
     }
 
     const payment = new Payment({
-      razorpayOrderId: razorpay_order_id,
+      orderId: order._id,
       paymentId: razorpay_payment_id,
       signature: razorpay_signature,
       amount: order.amount,
       status: "verified",
-      cartId: order.cartId ? order.cartId._id : null, 
-      courseId: order.courseId ? order.courseId._id : null,
-      orderId: order._id,
     });
-
 
     const savedPayment = await payment.save();
     const populatedPayment = await Payment.findById(savedPayment._id).populate("orderId");
 
-    // if (userId) {
-    //   await User.findByIdAndUpdate(userId, {
-    //     $push: { transactions: savedPayment._id },
-    //   });
-    // }
-  //    const courseTitle = order.courseId?.title || "a course";
-    
-  // const note = order.cartId
-  // ? `User purchased ${cartItems?.length ?? 0} course(s)`
-  // : `User purchased ${courseTitle} course`;
- if (savedPayment.status === "verified") {
-  if (order.cartId && order.cartId._id) {
-    await Cart.findByIdAndUpdate(order.cartId._id, {
-      $set: { cartItems: [] },
-    })
-  } else if (order.courseId && order.courseId._id && userId) {
-    await Cart.findOneAndUpdate(
-      { user: userId },
-      { $pull: { cartItems: order.courseId._id } },
-      { new: true }
-    )
-  }
-}
+    if (savedPayment.status === "verified") {
+      if (order.cartId && order.cartId._id) {
+        await Cart.findByIdAndUpdate(order.cartId._id, {
+          $set: { cartItems: [] },
+        });
+      } else if (order.courseId && order.courseId._id && userId) {
+        await Cart.findOneAndUpdate(
+          { user: userId },
+          { $pull: { cartItems: order.courseId._id } },
+          { new: true }
+        );
+      }
+    }
 
-
-
-   if (savedPayment.status === "verified" && userId) {
-  await User.findByIdAndUpdate(userId, {
+    if (savedPayment.status === "verified" && userId) {
+      await User.findByIdAndUpdate(userId, {
         $push: { transactions: savedPayment._id },
-        $addToSet: {
-          purchasedCourses: { $each: purchasedCourses },
-        },
+        $addToSet: { purchasedCourses: { $each: purchasedCourses } },
       });
-}
-
-    // await order.cartId.save();
-
-   
-
+    }
 
     await ActivityLog.create({
       user:  req.user?.id,
@@ -205,10 +269,8 @@ exports.verifyPayment = async (req, res) => {
         transactionId: savedPayment._id,
         ip: req.ip,
         userAgent: req.headers["user-agent"],
-        // note,
       },
     });
-
 
     return res.status(200).json({
       success: true,
@@ -220,8 +282,7 @@ exports.verifyPayment = async (req, res) => {
         symbol: "₹"
       },
     });
-
   } catch (error) {
-   return errorResponse(res, error);
+    return errorResponse(res, error);
   }
 };

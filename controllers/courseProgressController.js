@@ -57,15 +57,15 @@ exports.getCourseProgress = async (req, res) => {
 
     let data = await CourseProgress.findOne({ userId, courseId });
     if (data) {
-      await logUserActivity({
-        userId,
-        activityType: "OTHER",
-        metadata: {
-          courseId,
-          message: "Viewed course progress",
-        },
-        req,
-      });
+      // await logUserActivity({
+      //   userId,
+      //   activityType: "OTHER",
+      //   metadata: {
+      //     courseId,
+      //     message: "Viewed course progress",
+      //   },
+      //   req,
+      // });
 
       return res.status(200).json({
         success: true,

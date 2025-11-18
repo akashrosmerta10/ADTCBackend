@@ -7,7 +7,7 @@ const UserSchema = new mongoose.Schema(
       type: [String],
       enum: ["Supervisor", "opsmanager", "centerhead", "User", "Trainer", "Learner", "Admin"],
     },
-   
+
 
     phoneNumber: {
       type: String,
@@ -58,7 +58,7 @@ const UserSchema = new mongoose.Schema(
         "Please enter a valid email address",
       ],
     },
-     pendingEmail: {
+    pendingEmail: {
       type: String,
       trim: true,
       lowercase: true,
@@ -74,13 +74,13 @@ const UserSchema = new mongoose.Schema(
       default: false,
       index: true,
     },
-   
+
     profilePhoto: {
       type: String,
       default: "/images/default-profile.png",
     },
-   
-   
+
+
     courses: [
       {
         type: mongoose.Schema.Types.ObjectId,
@@ -117,15 +117,25 @@ const UserSchema = new mongoose.Schema(
       ref: "Wishlist",
     },
 
-  //   address: {
-  //   pincode: { type: String },
-  //   address: { type: String },
-  //   state: { type: String },
-  //   city: { type: String },
-  //   country: { type: String, default: "India" },
+    completedCourse: {
+      type: Number,
+      default: 0,
+    },
 
-  // },
-  password: { type: String },
+    freeDomainUser: {
+      type: Boolean,
+      default: false
+    },
+
+    //   address: {
+    //   pincode: { type: String },
+    //   address: { type: String },
+    //   state: { type: String },
+    //   city: { type: String },
+    //   country: { type: String, default: "India" },
+
+    // },
+    password: { type: String },
     receiveUpdates: { type: Boolean, default: false },
     completedAt: { type: Date, default: null },
   },
@@ -135,7 +145,7 @@ UserSchema.pre("save", async function (next) {
   if (!this.isModified("password") || !this.password) return next();
   try {
     const salt = await bcrypt.genSalt(10);
-    this.password = await bcrypt.hash(this.password, salt); 
+    this.password = await bcrypt.hash(this.password, salt);
     next();
   } catch (error) {
     next(error);

@@ -1,10 +1,11 @@
+const { getSignedImageUrl } = require('../middleware/uploadToS3');
 const Category = require('../models/Category');
 const errorResponse = require('../utils/errorResponse');
 
 exports.createCategory = async (req, res) => {
   try {
-    const { name } = req.body;
-    const category = await Category.create({ name });
+    const { name, categoryImage } = req.body;
+    const category = await Category.create({ name, categoryImage });
 
     return res.status(201).json({
       success: true,
@@ -20,6 +21,11 @@ exports.createCategory = async (req, res) => {
 exports.getAllCategory = async (req, res) => {
   try {
     const categories = await Category.find();
+     for ( const cat of categories){
+      if (cat.categoryImage){
+        cat.categoryImage = await getSignedImageUrl(cat.categoryImage)
+      }
+    }
     return res.status(200).json({
       success: true,
       statusCode: 200,
@@ -34,6 +40,12 @@ exports.getAllCategory = async (req, res) => {
 exports.getCategory = async (req, res) => {
   try {
     const category = await Category.findById(req.params.id);
+
+    for ( const cat of category){
+      if (cat.categoryImage){
+        cat.categoryImage = await getSignedImageUrl(cat.categoryImage)
+      }
+    }
     if (!category) {
       return res.status(404).json({
         success: false,
@@ -55,12 +67,16 @@ exports.getCategory = async (req, res) => {
 
 exports.updateCategory = async (req, res) => {
   try {
-    const { name } = req.body;
+    const { name, categoryImage } = req.body;
+     const updateData = {};
+    if (name) updateData.name = name;
+    if (categoryImage) updateData.categoryImage = categoryImage;
     const category = await Category.findByIdAndUpdate(
       req.params.id,
-      { name },
+      updateData,
       { new: true }
     );
+    
 
     if (!category) {
       return res.status(404).json({
@@ -69,6 +85,10 @@ exports.updateCategory = async (req, res) => {
         message: 'Category not found',
         data: {},
       });
+    }
+
+     if (category.categoryImage) {
+      category.categoryImage = await getSignedImageUrl(category.categoryImage);
     }
 
     return res.status(200).json({

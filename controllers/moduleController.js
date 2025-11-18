@@ -116,7 +116,7 @@ exports.updateModule = async (req, res) => {
     res.status(200).json({
       success: true,
       statusCode: 200,
-      msg: "Module successfully updated.",
+      message: "Module successfully updated.",
       module: mod,
     });
   } catch (error) {

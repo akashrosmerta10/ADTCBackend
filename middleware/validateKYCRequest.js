@@ -1,5 +1,3 @@
-// middlewares/validateKYCRequest.js
-
 const validateKYCRequest = (req, res, next) => {
   const email = req.body.email || req.user?.email;
 

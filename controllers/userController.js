@@ -90,7 +90,7 @@ exports.getAllUsers = async (req, res) => {
             },
             {
               $lookup: {
-                from: "transactions",
+                from: "payments",
                 localField: "transactions",
                 foreignField: "_id",
                 as: "transactions",
@@ -116,23 +116,30 @@ exports.getAllUsers = async (req, res) => {
               },
             },
             {
+              $addFields: {
+                userType: {
+                  $cond: [
+                    { $eq: ["$roles", "Admin"] },
+                    "admin",
+                    {
+                      $cond: [
+                        { $in: ["Admin", { $ifNull: ["$roles", []] }] },
+                        "admin",
+                        "user",
+                      ],
+                    },
+                  ],
+                },
+              },
+            },
+
+            {
               $project: {
                 password: 0,
                 encryptedOTP: 0,
                 otpTimestamp: 0,
                 kycInfo: 0,
                 latestActivity: 0,
-              },
-            },
-            {
-              $addFields: {
-                userType: {
-                  $cond: [
-                    { $in: ["Admin", { $ifNull: ["$roles", []] }] },
-                    "admin",
-                    "user",
-                  ],
-                },
               },
             },
           ],
@@ -145,11 +152,21 @@ exports.getAllUsers = async (req, res) => {
         },
       },
     ];
-
     const aggResult = await User.aggregate(pipeline);
 
     const totalUsers = aggResult?.[0]?.totalUsers || 0;
     const users = aggResult?.[0]?.data || [];
+    await User.populate(users, {
+  path: "transactions.orderId",
+  model: "Order",
+});
+await User.populate(users, {
+  path: "transactions.orderId.orderedCourses",
+  model: "Course",
+  select: "title",
+});
+
+
 
     const formattedUsers = await Promise.all(
       users.map(async (user) => {
@@ -197,7 +214,8 @@ exports.getUserById = async (req, res) => {
           model: "Order",
         },
         options: { strictPopulate: false }
-      });
+      })
+      .lean();
 
     if (!user) {
       return res.status(404).json({
@@ -232,7 +250,7 @@ exports.getUserById = async (req, res) => {
       statusCode: 200,
       message: "User fetched successfully",
       data: {
-        ...user.toObject(),
+        ...user,
         profilePhoto: signedProfilePhoto || null,
       },
     });
@@ -256,7 +274,7 @@ exports.updateUser = async (req, res) => {
     const targetUserId = req.params.id;
 
     const admin = await User.findById(adminId);
-  if (!admin || !admin.roles.some(r => ["Admin", "Trainer", "Supervisor", "opsmanager", "centerhead"].includes(r))) {
+    if (!admin || !admin.roles.some(r => ["Admin", "Trainer", "Supervisor", "opsmanager", "centerhead"].includes(r))) {
       return res.status(403).json({
         success: false,
         statusCode: 403,
@@ -429,7 +447,7 @@ exports.createUser = async (req, res) => {
       user: userResponse,
     });
   } catch (error) {
- return errorResponse(res, error)
+    return errorResponse(res, error)
   }
 };
 
@@ -467,7 +485,7 @@ exports.addUserAddress = async (req, res) => {
 
     res.status(200).json({ success: true, statusCode: 200, message: "Address added successfully", address: user.address });
   } catch (error) {
-   return errorResponse(res, error)
+    return errorResponse(res, error)
   }
 };
 exports.getUserAddress = async (req, res) => {
@@ -500,4 +518,115 @@ exports.getUserAddress = async (req, res) => {
   }
 };
 
+exports.getAllAggregatedUser = async (req, res) => {
+  try {
+    const userId = req.user?.id || req.user?._id;
 
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(200).json({
+        success: true,
+        statusCode: 200,
+        message: "User not found",
+        data: null,
+      });
+    }
+
+    const agg = await User.aggregate([
+      {
+        $project: {
+          rolesLower: {
+            $map: {
+              input: { $ifNull: ["$roles", []] },
+              as: "r",
+              in: { $toLower: "$$r" },
+            },
+          },
+          purchasedCount: { $size: { $ifNull: ["$purchasedCourses", []] } },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          totalUsers: { $sum: 1 },
+          trainers: {
+            $sum: {
+              $cond: [
+                {
+                  $gt: [
+                    {
+                      $size: {
+                        $filter: {
+                          input: "$rolesLower",
+                          as: "r",
+                          cond: { $eq: ["$$r", "trainer"] },
+                        },
+                      },
+                    },
+                    0,
+                  ],
+                },
+                1,
+                0,
+              ],
+            },
+          },
+          students: {
+            $sum: {
+              $cond: [
+                {
+                  $and: [
+                    {
+                      $eq: [
+                        {
+                          $size: {
+                            $filter: {
+                              input: "$rolesLower",
+                              as: "r",
+                              cond: { $eq: ["$$r", "admin"] },
+                            },
+                          },
+                        },
+                        0,
+                      ],
+                    },
+                    {
+                      $gt: [
+                        {
+                          $size: {
+                            $filter: {
+                              input: "$rolesLower",
+                              as: "r",
+                              cond: { $or: [{ $eq: ["$$r", "user"] }, { $eq: ["$$r", "learner"] }] },
+                            },
+                          },
+                        },
+                        0,
+                      ],
+                    },
+                  ],
+                },
+                1,
+                0,
+              ],
+            },
+          },
+          purchased: { $sum: "$purchasedCount" },
+        },
+      },
+      { $project: { _id: 0, totalUsers: 1, trainers: 1, students: 1, purchased: 1 } },
+    ]);
+
+    const stats =
+      agg[0] || { totalUsers: 0, trainers: 0, students: 0, purchased: 0 };
+
+    return res.status(200).json({
+      success: true,
+      statusCode: 200,
+      message: "Aggregated user stats fetched successfully",
+      data: stats,
+    });
+  } catch (error) {
+    return errorResponse(res, error);
+  }
+};

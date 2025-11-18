@@ -7,6 +7,7 @@ const { getSignedImageUrl } = require('../middleware/uploadToS3');
 const errorResponse = require('../utils/errorResponse');
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
+const Category = require('../models/Category');
 
 
 exports.createCourse = async (req, res) => {
@@ -108,7 +109,10 @@ exports.createCourse = async (req, res) => {
 
 exports.getAllCourses = async (req, res) => {
   try {
-    const courses = await Course.find().populate("category", "name").populate("tags", "name");
+    const courses = await Course.find()
+      .populate("category", "name")
+      .populate("tags", "name")
+      .lean(); 
 
     let user = null;
     const authHeader = req.headers.authorization;
@@ -124,11 +128,9 @@ exports.getAllCourses = async (req, res) => {
 
     const data = await Promise.all(
       courses.map(async (course) => {
-        const courseObj = course.toObject();
-
+        const courseObj = { ...course };
 
         if (courseObj.image) {
-
           try {
             courseObj.image = await getSignedImageUrl(courseObj.image);
           } catch (error) {
@@ -139,7 +141,11 @@ exports.getAllCourses = async (req, res) => {
         courseObj.symbol = "₹";
         courseObj.isPurchased = false;
 
-        if (user?.purchasedCourses?.some(id => id.toString() === courseObj._id.toString())) {
+        if (
+          user?.purchasedCourses?.some(
+            (id) => id.toString() === courseObj._id.toString()
+          )
+        ) {
           courseObj.isPurchased = true;
         }
 
@@ -157,6 +163,7 @@ exports.getAllCourses = async (req, res) => {
     return errorResponse(res, error);
   }
 };
+
 
 exports.getCourse = async (req, res) => {
   try {
@@ -184,7 +191,6 @@ exports.getCourse = async (req, res) => {
         data: null,
       });
     }
-    let signedUrl = null;
 
     const courseObj = course.toObject();
     if (courseObj.image) {
@@ -341,14 +347,24 @@ exports.filteredCourses = async (req, res) => {
 
     if (name) {
       orCondition.push({ title: { $regex: name, $options: "i" } });
-      const matchedTags = await Tag.find({
-        name: { $regex: name, $options: "i" },
-      });
+     const matchedTags = await Tag.find(
+        { name: { $regex: name, $options: "i" } },
+        { _id: 1 }
+      );
 
       const tagIds = matchedTags.map((tag) => tag._id);
 
       if (tagIds.length > 0) {
         orCondition.push({ tags: { $in: tagIds } });
+      }
+    
+      const matchedCategories = await Category.find(
+        { name: { $regex: name, $options: "i" } },
+        { _id: 1 }
+      );
+      const categoryIds = matchedCategories.map((c) => c._id);
+      if (categoryIds.length > 0) {
+        orCondition.push({ category: { $in: categoryIds } });
       }
     }
 
@@ -356,7 +372,8 @@ exports.filteredCourses = async (req, res) => {
       filter.$or = orCondition;
     }
 
-    let courses = await Course.find(filter).populate("category", "name")
+    let courses = await Course.find(filter)
+      .populate("category", "name")
       .populate("tags", "name")
       .sort({ createdAt: -1 });
 
@@ -387,7 +404,11 @@ exports.filteredCourses = async (req, res) => {
         courseObj.symbol = "₹";
         courseObj.isPurchased = false;
 
-        if (user?.purchasedCourses?.some(id => id.toString() === courseObj._id.toString())) {
+        if (
+          user?.purchasedCourses?.some(
+            (id) => id.toString() === courseObj._id.toString()
+          )
+        ) {
           courseObj.isPurchased = true;
         }
 

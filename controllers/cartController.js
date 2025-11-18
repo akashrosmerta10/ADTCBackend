@@ -4,6 +4,7 @@ const { getSignedImageUrl, deleteFromS3 } = require('../middleware/uploadToS3');
 const ActivityLog = require("../models/ActivityLogs");
 const errorResponse = require("../utils/errorResponse");
 const { logUserActivity } = require("../utils/activityLogger");
+const User = require("../models/User");
 
 
 exports.addToCart = async (req, res) => {
@@ -239,18 +240,30 @@ await logUserActivity({
     return errorResponse(res, error);
   }
 };
+
 exports.totalCostSummary = async (req, res) => {
   try {
-    const { cartId, courseId } = req.query; 
-    console.log("params",req.params)
+    const userId = req.user.id || req.user._id;
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        statusCode: 404,
+        message: "User not found",
+        data: null,
+      });
+    }
+
+    const { cartId, courseId } = req.query;
 
     let courseIds = [];
-    let appliedCoupon = { code: "SAVE20", discountType: "percent", value: 20 }; 
+
+    let appliedCoupon = { code: "SAVE20", discountType: "percent", value: 20 };
 
     if (courseId) {
       courseIds = [courseId];
-    } 
-    else if (cartId) {
+    } else if (cartId) {
       const cart = await Cart.findById(cartId);
       if (!cart) {
         return res.status(404).json({
@@ -261,8 +274,7 @@ exports.totalCostSummary = async (req, res) => {
       }
       courseIds = cart.cartItems;
       if (cart.appliedCoupon) appliedCoupon = cart.appliedCoupon;
-    } 
-    else {
+    } else {
       return res.status(400).json({
         success: false,
         statusCode: 400,
@@ -280,33 +292,50 @@ exports.totalCostSummary = async (req, res) => {
     }
 
     const subtotal = courses.reduce((sum, course) => sum + course.price, 0);
+
+    const EMPLOYEE_COUPON = { code: "EMPLOYEE100", discountType: "percent", value: 100 };
+    const effectiveCoupon = user.freeDomainUser ? EMPLOYEE_COUPON : appliedCoupon;
+
     const discountAmount =
-      appliedCoupon.discountType === "percent"
-        ? (subtotal * appliedCoupon.value) / 100
-        : appliedCoupon.value;
+      effectiveCoupon.discountType === "percent"
+        ? (subtotal * effectiveCoupon.value) / 100
+        : effectiveCoupon.value;
 
     const taxPercent = 18;
-    const taxAmount = ((subtotal - discountAmount) * taxPercent) / 100;
-    const total = subtotal - discountAmount + taxAmount;
+    const taxableBase = Math.max(subtotal - discountAmount, 0);
+    const taxAmount = (taxableBase * taxPercent) / 100;
+
+    const isEmployee = user.freeDomainUser;
+    let total = isEmployee ? 0 : taxableBase + taxAmount;
 
     const currency = "INR";
     const symbol = "₹";
+    const moneyField = (amount, extra = {}) => ({ amount, symbol, ...extra });
 
-    const moneyField = (amount, extra = {}) => ({
-      amount,
-      symbol,
-      ...extra,
-    });
+   const items = await Promise.all(
+  courses.map(async (course) => {
+    const { _id, ...rest } = course.toObject();
 
-    const items = courses.map((course) => {
-      const { _id, ...rest } = course.toObject();
-      return {
-        courseId: _id,
-        ...rest,
-        price: moneyField(course.price),
-        quantity: 1,
-      };
-    });
+    let signedUrl = null;
+    if (course.image) {
+      try {
+        signedUrl = await getSignedImageUrl(course.image);
+      } catch (err) {
+        console.error("Error generating signed URL:", course._id, err.message);
+      }
+    }
+
+    return {
+      courseId: _id,
+      ...rest,
+      image: signedUrl, // only this key is replaced
+      price: moneyField(course.price),
+      quantity: 1,
+    };
+  })
+);
+
+    
 
     return res.status(200).json({
       success: true,
@@ -316,12 +345,13 @@ exports.totalCostSummary = async (req, res) => {
         mode: courseId ? "buy_now" : "cart_checkout",
         currency,
         subtotal: moneyField(subtotal),
-        discount: moneyField(discountAmount, {
-          code: appliedCoupon.code,
-          percent: appliedCoupon.value,
-          discountType: appliedCoupon.discountType,
+        discount: moneyField(Math.min(discountAmount, subtotal), {
+          code: effectiveCoupon.code,
+          percent: effectiveCoupon.discountType === "percent" ? effectiveCoupon.value : undefined,
+          discountType: effectiveCoupon.discountType,
+          isEmployeeCoupon: isEmployee,
         }),
-        tax: moneyField(taxAmount, { percent: taxPercent }),
+        tax: moneyField(isEmployee ? 0 : taxAmount, { percent: isEmployee ? 0 : taxPercent }),
         total: moneyField(total),
         items,
       },
