@@ -24,17 +24,18 @@ const sendEOTP = async (email, otp) => {
 exports.requestOTP = async (req, res) => {
   try {
     const { phoneNumber, portal, token } = req.body;
-     const captchaRes = await axios.post(
-    "https://challenges.cloudflare.com/turnstile/v0/siteverify",
-    new URLSearchParams({
-      secret: process.env.TURNSTILE_SECRET_KEY,
-      response: token,
-    })
-  );
 
-  if (!captchaRes.data.success) {
-    return res.status(400).json({ message: "Captcha verification failed" });
-  }
+    // const captchaRes = await axios.post(
+    //   "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+    //   new URLSearchParams({
+    //     secret: process.env.TURNSTILE_SECRET_KEY,
+    //     response: token,
+    //   })
+    // );
+
+    // if (!captchaRes.data.success) {
+    //   return res.status(400).json({ message: "Captcha verification failed" });
+    // }
  
 
     if (!phoneNumber) {

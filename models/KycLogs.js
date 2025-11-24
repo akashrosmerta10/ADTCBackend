@@ -12,7 +12,7 @@ const kycSchema = new mongoose.Schema(
           const today = new Date();
           const age = today.getFullYear() - value.getFullYear();
           const monthdiff = today.getMonth() - value.getMonth();
-          const daydiff = today.getDay() - value.getDay();
+          const daydiff = today.getDate() - value.getDate();
         const adjustage = monthdiff <0 || (monthdiff === 0 && daydiff < 0) ? age - 1 : age;
         return adjustage >= 18;
         }

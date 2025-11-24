@@ -26,15 +26,53 @@ exports.submitkyc = async (req, res) => {
       docPhoto: docPhotos[index] || null,
     }));
    const licenceFile = req.body?.licenceFile;
-    // if (!req.body.email) {
-    //   return res
-    //     .status(500)
-    //     .json({ success: false, message: "Please complete your profile" });
-    // }
+   const safeJSON = (field) => {
+      try {
+        return field ? JSON.parse(field) : undefined;
+      } catch {
+        return undefined;
+      }
+    };
+
+    const address = safeJSON(req.body.address);
+    const currentAddress = safeJSON(req.body.currentAddress);
+    const education = safeJSON(req.body.education);
+  
+let licenceType = req.body.licenceType;
+
+if (!req.body.hasLicence || req.body.hasLicence === "no") {
+  licenceType = null;
+}
+
+if (req.body.hasLicence === "yes" && !licenceType) {
+  return res.status(400).json({
+    success: false,
+    message: "Licence type is required",
+  });
+}
+
+if (
+  licenceType &&
+  !["learner", "driving"].includes(licenceType)
+) {
+  return res.status(400).json({
+    success: false,
+    message: "Invalid licence type",
+  });
+}
+
 
     const kycData = {
-      ...req.body,
       userId,
+       fatherOrHusbandName: req.body.fatherOrHusbandName,
+      gender: req.body.gender,
+      dob: req.body.dob,
+       hasLicence: req.body.hasLicence === "true",
+      licenceType: req.body.licenceType,
+      email: req.body.email,
+       address,
+      currentAddress,
+      education,
       docPhoto: docs,
       licenceFile,
     };
@@ -127,49 +165,55 @@ exports.getKYC = async (req, res) => {
     return errorResponse(res, error);
   }
 };
-
 exports.updateKYC = async (req, res) => {
   try {
     const userId = req.user?.id;
     if (!userId) {
-      return res
-        .status(400)
-        .json({ success: false, message: "User not authenticated" });
+      return res.status(400).json({
+        success: false,
+        message: "User not authenticated",
+      });
     }
 
-    const updateData = { ...req.body };
-    if (req.files?.docPhoto) updateData.docPhoto = req.files.docPhoto[0].path;
-    if (req.files?.licenceFile) updateData.licenceFile = req.files.licenceFile[0].path;
+    const updateData = {};
 
-    let updatedKYC;
+    for (const key in req.body) {
+      if (req.body[key] !== "" && req.body[key] !== undefined) {
+        updateData[key] = req.body[key];
+      }
+    }
 
-    if (req.method === "PUT") {
-      const requiredFields = ["docType", "docPhoto", "address", "dob"];
-      for (let field of requiredFields) {
-        if (!updateData[field]) {
-          return res
-            .status(400)
-            .json({
-              success: false,
-              message: `${field} is required for full KYC update`,
-            });
+    if (req.files?.docPhoto?.length > 0) {
+      updateData.docPhoto = req.files.docPhoto[0].path;
+    }
+
+    if (req.files?.licenceFile?.length > 0) {
+      updateData.licenceFile = req.files.licenceFile[0].path;
+    }
+    const nestedKeys = ["address", "currentAddress", "education"];
+
+    nestedKeys.forEach((field) => {
+      if (req.body[field]) {
+        try {
+          updateData[field] = JSON.parse(req.body[field]);
+        } catch (e) {
+          updateData[field] = req.body[field];
         }
       }
+    });
 
-      updatedKYC = await KYC.findOneAndUpdate({ userId }, updateData, {
-        new: true,
-        runValidators: true,
+
+    const updatedKYC = await KYC.findOneAndUpdate(
+      { userId },
+      { $set: updateData },
+      { new: true, runValidators: true }
+    );
+
+    if (!updatedKYC) {
+      return res.status(404).json({
+        success: false,
+        message: "No KYC record found for this user",
       });
-    } else if (req.method === "PATCH") {
-      updatedKYC = await KYC.findOneAndUpdate(
-        { userId },
-        { $set: updateData },
-        { new: true, runValidators: true }
-      );
-    } else {
-      return res
-        .status(405)
-        .json({ success: false, message: "Method not allowed" });
     }
 
     await logUserActivity({
@@ -189,6 +233,7 @@ exports.updateKYC = async (req, res) => {
       message: "KYC updated successfully",
       data: updatedKYC,
     });
+
   } catch (error) {
     return errorResponse(res, error);
   }

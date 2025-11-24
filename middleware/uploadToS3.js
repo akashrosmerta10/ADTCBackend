@@ -45,12 +45,12 @@ const uploadToS3Middleware = (...fields) => {
           uniqueKey = `Shikshan/courses/${Title}/${Title}.${fileExtension}`;
           req.body.courseImage = uniqueKey;
         } else if (fieldname === "profilePhoto" && req.body.email) {
-          const email = req.body.email.replace(/[@.]/g, "_");
+          const email = req.body.email;
 
           uniqueKey = `Shikshan/profile/${email}/${fieldname}.${fileExtension}`;
           req.body[fieldname] = uniqueKey;
         } else if (fieldname === "docPhoto" && req.body.email) {
-          const email = req.body.email.replace(/[@.]/g, "_");
+          const email = req.body.email;
           const index = uploadedFiles.findIndex((u) => u.file === file);
           const docType =
             Array.isArray(req.body.docType) && req.body.docType[index]
@@ -62,7 +62,7 @@ const uploadToS3Middleware = (...fields) => {
           if (!req.body.docPhoto) req.body.docPhoto = [];
           req.body.docPhoto.push(uniqueKey);
         } else if (fieldname === "licenceFile" && req.body.email) {
-          const email = req.body.email.replace(/[@.]/g, "_");
+          const email = req.body.email;
           uniqueKey = `Shikshan/profile/${email}/licence.${fileExtension}`;
           req.body.licenceFile = uniqueKey;
         } else if (fieldname === "questionimage" && moduleId) {

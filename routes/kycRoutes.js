@@ -26,18 +26,18 @@ router.post('/submit', auth,
   uploadToS3Middleware("docPhoto", "licenceFile"),
   submitkyc);
 
-router.get("/getkyc", auth, getKYC);
+router.get("/getkyc/:userId", auth, getKYC);
 
-router.put(
-  "/editkyc",
-  auth,
-  upload.fields([
-    { name: "docPhoto", maxCount: 5 },
-    { name: "licenceFile", maxCount: 1 },
-  ]),
-  uploadToS3Middleware("docPhoto", "licenceFile"),
-  updateKYC
-);
+// router.put(
+//   "/editkyc",
+//   auth,
+//   upload.fields([
+//     { name: "docPhoto", maxCount: 5 },
+//     { name: "licenceFile", maxCount: 1 },
+//   ]),
+//   uploadToS3Middleware("docPhoto", "licenceFile"),
+//   updateKYC
+// );
 router.patch(
   "/editkyc",
   auth,

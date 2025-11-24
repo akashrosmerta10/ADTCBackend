@@ -305,6 +305,14 @@ exports.updateUser = async (req, res) => {
     }
     Object.assign(user, updates);
     await user.save();
+      if (updates.kycStatus) {
+      await KYCLogs.findOneAndUpdate(
+        { userId: targetUserId },
+        { status: updates.kycStatus },
+        { new: true }
+      );
+    }
+    const kycLog = await KYCLogs.findOne({ userId: targetUserId });
 
     const updatedUser = await User.findById(targetUserId).populate("courses", "_id title");
     const userResponse = updatedUser.toObject();
@@ -326,6 +334,7 @@ exports.updateUser = async (req, res) => {
       statusCode: 200,
       message: "User updated",
       data: userResponse,
+      kycStatus: kycLog ? kycLog.status : null,
     });
   } catch (error) {
     errorResponse(res, error);
