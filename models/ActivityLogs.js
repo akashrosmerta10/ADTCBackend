@@ -27,6 +27,7 @@ const activityLogSchema = new mongoose.Schema({
       "PURCHASE",
       "COURSE_COMPLETED",
       "COURSE_PROGRESS_INITIALIZED",
+      "COURSE_PROGRESS_UPDATED",
       "KYC_SUBMITTED",
       "KYC_UPDATED",
       "KYC_VIEWED",

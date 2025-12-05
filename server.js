@@ -60,6 +60,7 @@ app.use("/api/v1/assessments", require("./routes/assessmentSubmissionRoutes"));
 app.use("/api/v1/courseProgress", require("./routes/courseProgressRoutes"));
 app.use("/api/v1/assessment-analysis", require("./routes/assessmentAnalysisRoutes"));
 
+app.use('/api/v1/comments', require('./routes/commentsRoutes'))
 
 
 const PORT = process.env.PORT ;

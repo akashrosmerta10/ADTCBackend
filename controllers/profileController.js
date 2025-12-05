@@ -85,8 +85,7 @@ exports.getProfile = async (req, res) => {
     }
     const isProfileCompleted = Boolean(
       user.firstName &&
-      user.lastName &&
-      user.email
+      user.lastName
     );
 
     return res.status(200).json({

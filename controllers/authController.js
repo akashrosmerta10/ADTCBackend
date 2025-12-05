@@ -5,6 +5,7 @@ const { sendEmailOTP } = require("./mailController");
 const errorResponse = require("../utils/errorResponse");
 const axios = require("axios");
 const { logUserActivity } = require("../utils/activityLogger");
+const mongoose = require('mongoose');
 
 
 const generateOTP = () => {
@@ -24,18 +25,17 @@ const sendEOTP = async (email, otp) => {
 exports.requestOTP = async (req, res) => {
   try {
     const { phoneNumber, portal, token } = req.body;
+     const captchaRes = await axios.post(
+    "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+    new URLSearchParams({
+      secret: process.env.TURNSTILE_SECRET_KEY,
+      response: token,
+    })
+  );
 
-    // const captchaRes = await axios.post(
-    //   "https://challenges.cloudflare.com/turnstile/v0/siteverify",
-    //   new URLSearchParams({
-    //     secret: process.env.TURNSTILE_SECRET_KEY,
-    //     response: token,
-    //   })
-    // );
-
-    // if (!captchaRes.data.success) {
-    //   return res.status(400).json({ message: "Captcha verification failed" });
-    // }
+  if (!captchaRes.data.success) {
+    return res.status(400).json({ message: "Captcha verification failed" });
+  }
  
 
     if (!phoneNumber) {
@@ -596,7 +596,6 @@ exports.logout = async (req, res) => {
   }
 };
 
-
 exports.requestEmailOTP = async (req, res) => {
   try {
     const userId = req.user?.id || req.user?._id;
@@ -604,29 +603,38 @@ exports.requestEmailOTP = async (req, res) => {
       return res.status(401).json({ success: false, statusCode: 401, message: "Unauthorized", data: null });
     }
 
-    const { email } = req.body;
-    if (!email) {
+    const emailRaw = req.body?.email;
+    if (!emailRaw) {
       return res.status(400).json({ success: false, statusCode: 400, message: "Email is required", data: null });
     }
 
+    const email = emailRaw.trim().toLowerCase();
     const user = await User.findById(userId);
+
     if (!user) {
       return res.status(404).json({ success: false, statusCode: 404, message: "User not found", data: null });
     }
 
-    user.pendingEmail = email;
+    const existingUser = await User.findOne({ email });
+
+    if (existingUser && existingUser.emailVerified) {
+      return res.status(400).json({
+        success: false,
+        statusCode: 400,
+        message: "Email already exists",
+        data: null,
+      });
+    }
 
     const otp = generateOTP();
 
+    user.pendingEmail = email;
     user.emailEncryptedOTP = await bcrypt.hash(otp, await bcrypt.genSalt(10));
     user.emailOtpTimestamp = new Date();
+
     await user.save();
 
-    try {
-      await sendEmailOTP({ to: email, otp });
-    } catch (err) {
-      return res.status(500).json({ success: false, statusCode: 500, message: "Failed to send email OTP", data: null });
-    }
+    await sendEmailOTP({ to: email, otp });
 
     await logUserActivity({
       userId: user._id,
@@ -641,12 +649,17 @@ exports.requestEmailOTP = async (req, res) => {
       message: "Email OTP sent successfully",
       data: { email },
     });
+
   } catch (error) {
+    console.error("requestEmailOTP error:", error);
     return errorResponse(res, error);
   }
 };
 
+
 exports.verifyEmailOTP = async (req, res) => {
+  const session = await mongoose.startSession();
+
   try {
     const userId = req.user?.id || req.user?._id;
     const { email, otp } = req.body;
@@ -661,7 +674,10 @@ exports.verifyEmailOTP = async (req, res) => {
       return res.status(400).json({ success: false, statusCode: 400, message: "OTP is required", data: null });
     }
 
+    const normalizedEmail = email.trim().toLowerCase();
+
     const user = await User.findById(userId);
+
     if (!user) {
       return res.status(404).json({ success: false, statusCode: 404, message: "User not found", data: null });
     }
@@ -670,39 +686,53 @@ exports.verifyEmailOTP = async (req, res) => {
       return res.status(400).json({ success: false, statusCode: 400, message: "OTP not requested or expired", data: null });
     }
 
-    if (user.pendingEmail && user.pendingEmail !== email) {
+    if (user.pendingEmail && user.pendingEmail !== normalizedEmail) {
       return res.status(400).json({ success: false, statusCode: 400, message: "Email does not match pending email", data: null });
     }
 
     const isValidOTP = await bcrypt.compare(otp, user.emailEncryptedOTP);
     const minutes = (Date.now() - new Date(user.emailOtpTimestamp).getTime()) / 60000;
+
     if (!isValidOTP || minutes > 5) {
       return res.status(400).json({ success: false, statusCode: 400, message: "Invalid or expired OTP", data: null });
     }
 
-    if (user.pendingEmail) {
-      user.email = user.pendingEmail;
-    }
-    user.pendingEmail = null;
-    user.emailVerified = true;
-    user.emailEncryptedOTP = null;
-    user.emailOtpTimestamp = null;
-    user.updatedAt = new Date();
+    await session.withTransaction(async () => {
+      const updateOther = await User.updateMany(
+        { email: normalizedEmail, _id: { $ne: userId } },
+        {
+          $unset: {
+            email: "",
+            pendingEmail: "",
+            emailEncryptedOTP: "",
+            emailOtpTimestamp: ""
+          }
+        },
+        { session }
+      );
 
-
-    const domain = user.email.split("@")[1];
-   const freeDomains = process.env.FREE_DOMAINS.split(",");
-
-    if (freeDomains.includes(domain)) {
-      user.freeDomainUser = true;
-    }
-
-    await user.save();
+      const updateCurrent = await User.updateOne(
+        { _id: userId },
+        {
+          $set: {
+            email: normalizedEmail,
+            emailVerified: true,
+            updatedAt: new Date()
+          },
+          $unset: {
+            pendingEmail: "",
+            emailEncryptedOTP: "",
+            emailOtpTimestamp: ""
+          }
+        },
+        { session }
+      );
+    });
 
     await logUserActivity({
-      userId: user._id,
+      userId: userId,
       activityType: "EMAIL_VERIFIED",
-      metadata: { email: user.email },
+      metadata: { email: normalizedEmail },
       req,
     });
 
@@ -710,10 +740,17 @@ exports.verifyEmailOTP = async (req, res) => {
       success: true,
       statusCode: 200,
       message: "Email verified successfully",
-      data: { emailVerified: true, email: user.email, freeDomainUser: user.freeDomainUser || false  },
+      data: {
+        emailVerified: true,
+        email: normalizedEmail,
+        freeDomainUser: false,
+      },
     });
+
   } catch (error) {
     return errorResponse(res, error);
+  } finally {
+    await session.endSession();
   }
 };
 
@@ -721,50 +758,64 @@ exports.verifyEmailOTP = async (req, res) => {
 exports.resendEmailOTP = async (req, res) => {
   try {
     const userId = req.user?.id || req.user?._id;
-    const { email } = req.body || {};
-
+    
     if (!userId) {
+      console.log("Unauthorized: No user ID found");
       return res.status(401).json({ success: false, statusCode: 401, message: "Unauthorized", data: null });
     }
+
+    const emailRaw = req.body?.email;
+    
+    if (!emailRaw) {
+      return res.status(400).json({ success: false, statusCode: 400, message: "Email is required", data: null });
+    }
+
+    const email = emailRaw.trim().toLowerCase();
 
     const user = await User.findById(userId);
     if (!user) {
       return res.status(404).json({ success: false, statusCode: 404, message: "User not found", data: null });
     }
 
-    let targetEmail = user.pendingEmail;
-    if (!targetEmail && email) {
-      targetEmail = email;
-      user.pendingEmail = email;
-    }
+    const existingUser = await User.findOne({ email });
 
-    if (!targetEmail) {
-      return res.status(400).json({ success: false, statusCode: 400, message: "No email to send OTP to", data: null });
+    if (existingUser && existingUser.emailVerified) {
+      return res.status(400).json({
+        success: false,
+        statusCode: 400,
+        message: "Email already exists",
+        data: null,
+      });
     }
 
     const now = Date.now();
     const last = user.emailOtpTimestamp ? new Date(user.emailOtpTimestamp).getTime() : 0;
     const secondsSinceLast = (now - last) / 1000;
+    
     if (secondsSinceLast < 60) {
+      const waitTime = Math.ceil(60 - secondsSinceLast);
       return res.status(429).json({
         success: false,
         statusCode: 429,
-        message: `Please wait ${Math.ceil(60 - secondsSinceLast)} seconds before requesting another OTP`,
+        message: `Please wait ${waitTime} seconds before requesting another OTP`,
         data: null,
       });
     }
 
     const otp = generateOTP();
+
+    user.pendingEmail = email;
     user.emailEncryptedOTP = await bcrypt.hash(otp, await bcrypt.genSalt(10));
     user.emailOtpTimestamp = new Date();
+
     await user.save();
 
-    await sendEmailOTP({ to: targetEmail, otp });
+    await sendEmailOTP({ to: email, otp });
 
     await logUserActivity({
       userId: user._id,
       activityType: "EMAIL_OTP_RESEND",
-      metadata: { email: targetEmail },
+      metadata: { email },
       req,
     });
 
@@ -772,8 +823,9 @@ exports.resendEmailOTP = async (req, res) => {
       success: true,
       statusCode: 200,
       message: "Email OTP resent successfully",
-      data: { email: targetEmail },
+      data: { email },
     });
+
   } catch (error) {
     return errorResponse(res, error);
   }

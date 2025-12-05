@@ -5,6 +5,28 @@ const Course = require("../models/Course");
 const errorResponse = require("../utils/errorResponse");
 const { logUserActivity } = require("../utils/activityLogger");
 
+async function enrichModulesWithNames(courseProgress) {
+  if (!courseProgress) return courseProgress;
+
+  const courseId = courseProgress.courseId.toString();
+  const course = await Course.findById(courseId, { modules: 1, name: 1 }).lean();
+  if (!course) return courseProgress;
+
+  const moduleMap = new Map();
+  (course.modules || []).forEach((m) => {
+    moduleMap.set(m._id.toString(), m.name || m.title || "");
+  });
+
+  courseProgress.modules = courseProgress.modules.map((mod) => ({
+    ...mod,
+    moduleName: moduleMap.get(mod.moduleId.toString()) || "",
+  }));
+
+  courseProgress.courseName = course.name || "";
+
+  return courseProgress;
+}
+
 exports.saveProgress = async (req, res) => {
   const {
     courseId,
@@ -26,15 +48,16 @@ exports.saveProgress = async (req, res) => {
       });
     }
 
+    const numericDuration = Number.isFinite(videoDuration) ? Number(videoDuration) : 0;
     const updatedScorm = await ScormProgress.findOneAndUpdate(
       { userId, courseId, moduleId },
       {
         $set: {
-          lessonLocation: lessonLocation || "",
-          lastPosition: lastPosition || "",
-          lessonStatus: lessonStatus || "incomplete",
+          lessonLocation: lessonLocation ?? "",
+          lastPosition: lastPosition ?? "",
+          lessonStatus: (lessonStatus || "incomplete"),
           scormData: scormData || {},
-          videoDuration: typeof videoDuration === "number" ? videoDuration : 0,
+          videoDuration: numericDuration > 0 ? numericDuration : 0,
           lastUpdatedAt: new Date(),
         },
       },
@@ -58,27 +81,31 @@ exports.saveProgress = async (req, res) => {
       });
     }
 
-    let newModuleProgress = 0;
-    if (videoDuration > 0 && lessonLocation !== undefined && lessonLocation !== null) {
-      const watched =
-        typeof lessonLocation === "string"
-          ? parseInt(lessonLocation, 10)
-          : lessonLocation;
-      newModuleProgress = Math.min(100, Math.floor((watched / videoDuration) * 100));
-    } else {
-      switch (lessonStatus) {
-        case "completed":
-        case "passed":
-          newModuleProgress = 100;
-          break;
-        case "incomplete":
-        case "failed":
-          newModuleProgress = 50;
-          break;
-        default:
-          newModuleProgress = 0;
+    const existingEntry = courseProgress.modules.find(
+      (m) => String(m.moduleId) === String(moduleId)
+    );
+    const existingProgress = Number(existingEntry?.progress || 0);
+
+    const hasValidDuration = Number.isFinite(numericDuration) && numericDuration > 0;
+    const loc = (typeof lastPosition === "string" ? parseFloat(lastPosition) : Number(lastPosition)) || 0;
+
+    let computedProgress = existingProgress;
+    if (hasValidDuration && loc >= 0) {
+      const raw = (loc / numericDuration) * 100;
+
+      let normalized = Math.min(100, Math.max(0, Math.round(raw)));
+
+      if (normalized >= 95) {
+        normalized = 100;
       }
+
+      computedProgress = normalized;
+
+    } else {
+      computedProgress = existingProgress;
     }
+
+    const newModuleProgress = Math.max(existingProgress, computedProgress);
 
     let updatedCourse = await CourseProgress.findOneAndUpdate(
       { userId, courseId, "modules.moduleId": moduleId },
@@ -108,14 +135,14 @@ exports.saveProgress = async (req, res) => {
     }
 
     const totalModules = updatedCourse.modules.length || 1;
-    const completedModules = updatedCourse.modules.filter(
-      (m) => (m.progress || 0) >= 100
-    ).length;
-    const overallProgress = Math.floor((completedModules / totalModules) * 100);
+    const sumPercent = updatedCourse.modules.reduce((acc, m) => acc + (Number(m.progress) || 0), 0);
+    const overallProgress = Math.round(sumPercent / totalModules);
 
     await CourseProgress.findByIdAndUpdate(updatedCourse._id, {
       $set: { overallProgress, lastComputedAt: new Date() },
     });
+
+    const enrichedCourseProgress = await enrichModulesWithNames(updatedCourse);
 
     // await logUserActivity({
     //   userId,
@@ -136,10 +163,7 @@ exports.saveProgress = async (req, res) => {
       message: "SCORM and course progress updated based on video watched %",
       data: {
         scorm: updatedScorm,
-        courseProgress: {
-          ...updatedCourse,
-          overallProgress,
-        },
+        courseProgress: enrichedCourseProgress,
       },
     });
   } catch (error) {
